@@ -22,7 +22,7 @@ pipeline {
     )
     string(
       name: 'HOST_PORT',
-      defaultValue: '3000',
+      defaultValue: '3020',
       description: 'Port on the Docker host to publish the app on.'
     )
     string(
