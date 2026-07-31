@@ -1,0 +1,30 @@
+# Reinstalled from package-lock.json in the deps stage; copying the host's
+# copy would be slow and could carry platform-specific binaries.
+node_modules
+.next
+out
+
+.git
+.gitignore
+
+# Local secrets and machine-specific settings never belong in an image.
+# ETMS_BACKEND_ORIGIN is supplied as a build arg instead, and
+# NEXT_PUBLIC_API_BASE_URL falls back to "/etms/api" in src/config/api.js.
+.env
+.env.local
+.env.*.local
+
+Dockerfile
+.dockerignore
+Jenkinsfile
+docker-compose*.yml
+
+.claude
+README.md
+AGENTS.md
+CLAUDE.md
+
+npm-debug.log*
+yarn-error.log*
+*.log
+.DS_Store
