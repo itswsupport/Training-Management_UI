@@ -94,12 +94,47 @@ pipeline {
         script {
           def network = params.DOCKER_NETWORK?.trim() ? "--network ${params.DOCKER_NETWORK}" : ''
           sh """
+            set -e
+
+            # Preflight. Nothing is torn down until the port is known to be
+            # ours to take: a clash used to surface only after `docker rm -f`
+            # had already destroyed the running container, so a port held by
+            # something else took the site down instead of failing the build.
+            OTHERS=\$(docker ps --filter "publish=${params.HOST_PORT}" --format '{{.Names}}' | grep -vx '${CONTAINER}' || true)
+            if [ -n "\$OTHERS" ]; then
+              echo "port ${params.HOST_PORT} is already published by container(s): \$OTHERS"
+              echo "the running ${CONTAINER} has been left untouched — free that port or pick another HOST_PORT"
+              exit 1
+            fi
+
+            # With our own container not running, any listener on the port
+            # belongs to something outside Docker. If ss is missing the grep
+            # finds nothing and this degrades to the previous behaviour.
+            if [ -z "\$(docker ps -q -f name='^${CONTAINER}\$')" ]; then
+              if ss -ltn 2>/dev/null | grep -q ':${params.HOST_PORT} '; then
+                echo "port ${params.HOST_PORT} is held by a process on the host, not by Docker:"
+                ss -ltnp 2>/dev/null | grep ':${params.HOST_PORT} ' || true
+                exit 1
+              fi
+            fi
+
             docker rm -f ${CONTAINER} || true
+
+            # docker-proxy can keep the binding for a moment after the
+            # container goes. Wait for it to let go rather than racing it.
+            for i in \$(seq 1 15); do
+              ss -ltn 2>/dev/null | grep -q ':${params.HOST_PORT} ' || break
+              sleep 1
+            done
+
+            # HOST_PORT:3000 — the right-hand side is the port INSIDE the
+            # container, and the image fixes that at 3000 (ENV PORT=3000 in
+            # the Dockerfile). Only the left-hand side is yours to choose.
             docker run -d \
               --name ${CONTAINER} \
               --restart unless-stopped \
               ${network} \
-              -p ${params.HOST_PORT}:3020 \
+              -p ${params.HOST_PORT}:3000 \
               ${IMAGE}:${TAG}
           """
         }
