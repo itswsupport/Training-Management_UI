@@ -134,7 +134,7 @@ pipeline {
               --name ${CONTAINER} \
               --restart unless-stopped \
               ${network} \
-              -p ${params.HOST_PORT}:3020 \
+              -p ${params.HOST_PORT}:3000 \
               ${IMAGE}:${TAG}
           """
         }
