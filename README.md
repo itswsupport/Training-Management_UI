@@ -87,3 +87,31 @@ crashing a dashboard.
   `CourseStatusService` caches it in-tab for a minute.
 - The module draft slot is global (`findByStatus(0)`), so `saveModule` reuses
   the current draft id and clears its leftover sections.
+
+## Deployment
+
+Live at `https://replportal.co.in/etms/` on `206.189.134.85`, built by Jenkins
+into a Docker image and run behind nginx. ETMS is independent of the dashboard
+hub ecosystem — its own login, its own roles, no shared JWT and no hub tile.
+
+| | UI (this repo) | Backend (`REPL-IT-Projects/etms`) |
+|---|---|---|
+| Image / container | `etms-ui` | `etms-backend` |
+| Host port | `3020` → 3000 | `8096` → 8096 |
+| Jenkinsfile | `Jenkinsfile` | `etms/Jenkinsfile` |
+
+`ETMS_BACKEND_ORIGIN` is a **build** argument, not a runtime variable:
+`next.config.mjs` reads it inside `rewrites()`, and Next resolves the config at
+build time and writes it into the server manifest. Pointing the image at a
+different backend requires a rebuild, not a restart. It defaults to
+`http://172.17.0.1:8096/trainingmodule` — the docker0 gateway, i.e. the host,
+where the backend publishes 8096; never `localhost`, which inside the container
+is the container itself.
+
+`basePath` and `assetPrefix` are both `/etms`, so nginx must proxy to
+`http://127.0.0.1:3020/etms/` **with** the prefix rather than stripping it.
+
+See [deploy/RUNBOOK.md](deploy/RUNBOOK.md) for the full procedure, and
+[deploy/nginx-etms.conf](deploy/nginx-etms.conf) for the server block — its
+`client_max_body_size 1024m` is required, or video uploads 413 at the proxy
+before reaching the 1GB limits configured in the app and the backend.

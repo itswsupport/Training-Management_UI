@@ -7,6 +7,8 @@
 pipeline {
   agent any
 
+  triggers { githubPush() }
+
   options {
     timestamps()
     disableConcurrentBuilds()
@@ -17,8 +19,8 @@ pipeline {
   parameters {
     string(
       name: 'ETMS_BACKEND_ORIGIN',
-      defaultValue: 'http://etms-backend:8096/trainingmodule',
-      description: 'Spring backend the /etms/api rewrite forwards to. Baked in at BUILD time — changing it requires a rebuild, not a restart. Never "localhost" here: inside the container that is the container itself.'
+      defaultValue: 'http://172.17.0.1:8096/trainingmodule',
+      description: 'Spring backend the /etms/api rewrite forwards to. Baked in at BUILD time — changing it requires a rebuild, not a restart. Never "localhost" here: inside the container that is the container itself. 172.17.0.1 is the docker0 gateway, i.e. the Docker host, where etms-backend publishes 8096 — this works on the default bridge with no shared network. Use http://etms-backend:8096/trainingmodule only if you also set DOCKER_NETWORK to a network both containers join.'
     )
     string(
       name: 'HOST_PORT',
