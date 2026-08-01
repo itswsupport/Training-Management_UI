@@ -30,13 +30,26 @@ ss -ltn | grep -E ':(3020|8096) '     # expect no output
 
 ## 1. Jenkins credentials
 
-The backend pipeline needs exactly **one** credential:
+**Nothing new to create.** The backend reuses the three shared Secret text
+credentials the rest of the fleet already uses — the same ones CLMS reads, and
+the convention `application-prod.properties` documents:
 
 | ID | Kind | Contents |
 |---|---|---|
-| `etms-db` | Username with password | The MySQL account for `db_ems_version2` on `172.17.0.1:3309` |
+| `DB_URL` | Secret text | JDBC base url **with a trailing slash**, shared by every project |
+| `DB_USERNAME` | Secret text | Shared MySQL account |
+| `db-password` | Secret text | That account's password |
 
-The UI pipeline needs none.
+`DB_NAME` (`db_ems_version2`) is project-specific and not a secret, so it is set
+in the Jenkinsfile rather than the credential store.
+
+The UI pipeline needs no credentials at all beyond checkout.
+
+Worth one check before the first deploy: the CLMS Jenkinsfile comments its
+`DB_URL` as port **3009**, while the fleet inventory puts MySQL on **3309**. The
+credential holds whichever is real — CLMS deploys against it — but confirm
+`db_ems_version2` lives on the same instance as `prod_clms` before assuming the
+shared url reaches it.
 
 For repository checkout:
 
