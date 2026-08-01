@@ -38,12 +38,16 @@ The backend pipeline needs exactly **one** credential:
 
 The UI pipeline needs none.
 
-For repository checkout both jobs use `ui-payroll`, the credential the fleet
-already uses for `itswsupport/*` repos. Both ETMS repos are private and reachable
-only through the `itswsupport` account — run one manual build of each job and
-confirm checkout succeeds before wiring the webhooks. If the backend checkout
-fails, try `payroll-backend` instead, which is what `REPL-IT-Projects/payRoll`
-uses.
+For repository checkout:
+
+| Job | Credential | Status |
+|---|---|---|
+| `etms-backend` | `payroll-backend` | confirmed working — this is what the first build used |
+| `etms-ui` | `ui-payroll` | the credential the fleet uses for `itswsupport/*` repos |
+
+Both repos are private. The backend's credential is settled; run one manual
+build of `etms-ui` and confirm checkout succeeds before wiring its webhook, and
+fall back to `payroll-backend` if it does not.
 
 ## 2. Create the two jobs
 
@@ -56,32 +60,42 @@ java -jar jenkins-cli.jar -s http://<jenkins>/ create-job etms-ui      < jenkins
 `jenkins-job-etms-ui.xml` is next to this file.
 
 Or create two Pipeline jobs by hand — *Pipeline script from SCM*, Git, the repo
-URL, `*/master`, credential `ui-payroll`, and the script path from the table
-above. The backend's script path is **not** the default `Jenkinsfile`.
+URL, `*/master`, the checkout credential from the table above, and the script
+path. The backend's script path is **not** the default `Jenkinsfile`.
+
+**Neither job takes build parameters.** Every deployment value is fixed in the
+Jenkinsfile's `environment` block, so a deploy is reproducible from the commit
+alone and the running container always matches what is in git. To change a port,
+the schema or the backend origin, edit the Jenkinsfile and push — the change is
+then reviewed and has a history. The only value from outside the repository is
+the database username and password, via the `etms-db` credential.
 
 ## 3. Build the backend first
 
-Run `etms-backend`. Defaults are production-ready:
+Run `etms-backend`. It deploys with:
 
-- `HOST_PORT` `8096`
-- `DB_URL` `jdbc:mysql://172.17.0.1:3309/` (trailing slash is required — the
-  profile composes the url as `${DB_URL}${DB_NAME}`)
-- `DB_NAME` `db_ems_version2`
-- `UPLOAD_DIR` `/srv/etms/upload` — bind-mounted at `/upload`. Training videos
-  and material files live here. **Get this right the first time**: it is created
-  if missing, but pointing it somewhere else later orphans everything already
-  uploaded.
-- `DOCKER_NETWORK` blank (default bridge)
+| | |
+|---|---|
+| `HOST_PORT` | `8096` |
+| `DB_URL` | `jdbc:mysql://172.17.0.1:3309/` — trailing slash required, the profile composes `${DB_URL}${DB_NAME}` |
+| `DB_NAME` | `db_ems_version2` |
+| `UPLOAD_DIR` | `/srv/etms/upload`, bind-mounted at `/upload` |
+
+`UPLOAD_DIR` holds the training videos and material files. **Get it right before
+the first deploy** — it is created if missing, but changing it later orphans
+everything already uploaded.
 
 The pipeline builds the war inside the image, so the agent needs Docker only —
 no JDK, no Maven.
 
 ## 4. Build the UI
 
-Run `etms-ui`. Defaults:
+Run `etms-ui`. It deploys with:
 
-- `HOST_PORT` `3020`
-- `ETMS_BACKEND_ORIGIN` `http://172.17.0.1:8096/trainingmodule`
+| | |
+|---|---|
+| `HOST_PORT` | `3020` |
+| `ETMS_BACKEND_ORIGIN` | `http://172.17.0.1:8096/trainingmodule` |
 
 `ETMS_BACKEND_ORIGIN` is consumed at **build** time, not run time —
 `next.config.mjs` reads it inside `rewrites()` and Next bakes it into the server
@@ -90,8 +104,8 @@ restarting the container.
 
 `172.17.0.1` is the docker0 gateway, i.e. the host, where the backend publishes
 8096. This works with both containers on the default bridge and no shared
-network. If you would rather they talk by container name, create a network, set
-`DOCKER_NETWORK` on **both** jobs, and set `ETMS_BACKEND_ORIGIN` to
+network. If you would rather they talk by container name, add `--network` to
+both `docker run` lines and set `ETMS_BACKEND_ORIGIN` to
 `http://etms-backend:8096/trainingmodule` — but note that a user-defined bridge's
 gateway is not `172.17.0.1`, so the backend then needs
 `--add-host=host.docker.internal:host-gateway` to keep reaching MySQL.

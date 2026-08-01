@@ -4,9 +4,10 @@
 
       java -jar jenkins-cli.jar -s http://<jenkins>/ create-job etms-ui < jenkins-job-etms-ui.xml
 
-  The pipeline's parameters (ETMS_BACKEND_ORIGIN, HOST_PORT, DOCKER_NETWORK,
-  DEPLOY) are declared in the Jenkinsfile itself and appear after the first
-  build, so they are intentionally not duplicated here.
+  The job takes no build parameters. Every deployment value — host port, backend
+  origin, image and container names — is fixed in the Jenkinsfile's environment
+  block, so a deploy is reproducible from the commit alone. Change one by
+  editing the Jenkinsfile and pushing.
 -->
 <flow-definition plugin="workflow-job@1571.vb_423c255d6d9">
   <actions>

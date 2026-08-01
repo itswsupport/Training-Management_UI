@@ -3,6 +3,13 @@
 // The agent needs Docker and nothing else: npm never runs on the agent itself,
 // it runs inside the builder image, so Node does not have to be installed or
 // kept in step with the project.
+//
+// Every deployment value is fixed in the environment block below. There are no
+// build parameters: a deploy should be reproducible from the commit alone, and
+// a job that can be launched with different values is a job whose running
+// container no longer matches what is in git. To change a port or the backend
+// origin, edit it here and push — that way the change is reviewed and has a
+// history.
 
 pipeline {
   agent any
@@ -16,33 +23,24 @@ pipeline {
     timeout(time: 30, unit: 'MINUTES')
   }
 
-  parameters {
-    string(
-      name: 'ETMS_BACKEND_ORIGIN',
-      defaultValue: 'http://172.17.0.1:8096/trainingmodule',
-      description: 'Spring backend the /etms/api rewrite forwards to. Baked in at BUILD time — changing it requires a rebuild, not a restart. Never "localhost" here: inside the container that is the container itself. 172.17.0.1 is the docker0 gateway, i.e. the Docker host, where etms-backend publishes 8096 — this works on the default bridge with no shared network. Use http://etms-backend:8096/trainingmodule only if you also set DOCKER_NETWORK to a network both containers join.'
-    )
-    string(
-      name: 'HOST_PORT',
-      defaultValue: '3020',
-      description: 'Port on the Docker host to publish the app on.'
-    )
-    string(
-      name: 'DOCKER_NETWORK',
-      defaultValue: '',
-      description: 'Optional docker network to join, so the backend is reachable by container name. Leave blank to use the default bridge.'
-    )
-    booleanParam(
-      name: 'DEPLOY',
-      defaultValue: true,
-      description: 'Untick to build and lint only, without replacing the running container.'
-    )
-  }
-
   environment {
     IMAGE     = 'etms-ui'
     CONTAINER = 'etms-ui'
     TAG       = "${env.BUILD_NUMBER}"
+
+    // Port on the Docker host to publish the app on. nginx proxies
+    // https://replportal.co.in/etms/ to 127.0.0.1 on this port.
+    HOST_PORT = '3020'
+
+    // Spring backend the /etms/api rewrite forwards to. Baked in at BUILD time
+    // — next.config.mjs reads it inside rewrites() and Next writes it into the
+    // server manifest, so changing it requires a rebuild, not a restart.
+    //
+    // Never "localhost" here: inside the container that is the container
+    // itself. 172.17.0.1 is the docker0 gateway, i.e. the Docker host, where
+    // etms-backend publishes 8096 — so this works on the default bridge with no
+    // shared network needed.
+    ETMS_BACKEND_ORIGIN = 'http://172.17.0.1:8096/trainingmodule'
   }
 
   stages {
@@ -63,7 +61,7 @@ pipeline {
         sh """
           docker build \
             --target builder \
-            --build-arg ETMS_BACKEND_ORIGIN='${params.ETMS_BACKEND_ORIGIN}' \
+            --build-arg ETMS_BACKEND_ORIGIN='${ETMS_BACKEND_ORIGIN}' \
             -t ${IMAGE}:builder-${TAG} \
             .
         """
@@ -82,7 +80,7 @@ pipeline {
       steps {
         sh """
           docker build \
-            --build-arg ETMS_BACKEND_ORIGIN='${params.ETMS_BACKEND_ORIGIN}' \
+            --build-arg ETMS_BACKEND_ORIGIN='${ETMS_BACKEND_ORIGIN}' \
             -t ${IMAGE}:${TAG} \
             -t ${IMAGE}:latest \
             .
@@ -91,66 +89,60 @@ pipeline {
     }
 
     stage('Deploy') {
-      when { expression { return params.DEPLOY } }
       steps {
-        script {
-          def network = params.DOCKER_NETWORK?.trim() ? "--network ${params.DOCKER_NETWORK}" : ''
-          sh """
-            set -e
+        sh """
+          set -e
 
-            # Preflight. Nothing is torn down until the port is known to be
-            # ours to take: a clash used to surface only after `docker rm -f`
-            # had already destroyed the running container, so a port held by
-            # something else took the site down instead of failing the build.
-            OTHERS=\$(docker ps --filter "publish=${params.HOST_PORT}" --format '{{.Names}}' | grep -vx '${CONTAINER}' || true)
-            if [ -n "\$OTHERS" ]; then
-              echo "port ${params.HOST_PORT} is already published by container(s): \$OTHERS"
-              echo "the running ${CONTAINER} has been left untouched — free that port or pick another HOST_PORT"
+          # Preflight. Nothing is torn down until the port is known to be
+          # ours to take: a clash used to surface only after `docker rm -f`
+          # had already destroyed the running container, so a port held by
+          # something else took the site down instead of failing the build.
+          OTHERS=\$(docker ps --filter "publish=${HOST_PORT}" --format '{{.Names}}' | grep -vx '${CONTAINER}' || true)
+          if [ -n "\$OTHERS" ]; then
+            echo "port ${HOST_PORT} is already published by container(s): \$OTHERS"
+            echo "the running ${CONTAINER} has been left untouched — free that port or change HOST_PORT in the Jenkinsfile"
+            exit 1
+          fi
+
+          # With our own container not running, any listener on the port
+          # belongs to something outside Docker. If ss is missing the grep
+          # finds nothing and this degrades to the previous behaviour.
+          if [ -z "\$(docker ps -q -f name='^${CONTAINER}\$')" ]; then
+            if ss -ltn 2>/dev/null | grep -q ':${HOST_PORT} '; then
+              echo "port ${HOST_PORT} is held by a process on the host, not by Docker:"
+              ss -ltnp 2>/dev/null | grep ':${HOST_PORT} ' || true
               exit 1
             fi
+          fi
 
-            # With our own container not running, any listener on the port
-            # belongs to something outside Docker. If ss is missing the grep
-            # finds nothing and this degrades to the previous behaviour.
-            if [ -z "\$(docker ps -q -f name='^${CONTAINER}\$')" ]; then
-              if ss -ltn 2>/dev/null | grep -q ':${params.HOST_PORT} '; then
-                echo "port ${params.HOST_PORT} is held by a process on the host, not by Docker:"
-                ss -ltnp 2>/dev/null | grep ':${params.HOST_PORT} ' || true
-                exit 1
-              fi
-            fi
+          docker rm -f ${CONTAINER} || true
 
-            docker rm -f ${CONTAINER} || true
+          # docker-proxy can keep the binding for a moment after the
+          # container goes. Wait for it to let go rather than racing it.
+          for i in \$(seq 1 15); do
+            ss -ltn 2>/dev/null | grep -q ':${HOST_PORT} ' || break
+            sleep 1
+          done
 
-            # docker-proxy can keep the binding for a moment after the
-            # container goes. Wait for it to let go rather than racing it.
-            for i in \$(seq 1 15); do
-              ss -ltn 2>/dev/null | grep -q ':${params.HOST_PORT} ' || break
-              sleep 1
-            done
-
-            # HOST_PORT:3000 — the right-hand side is the port INSIDE the
-            # container, and the image fixes that at 3000 (ENV PORT=3000 in
-            # the Dockerfile). Only the left-hand side is yours to choose.
-            docker run -d \
-              --name ${CONTAINER} \
-              --restart unless-stopped \
-              ${network} \
-              -p ${params.HOST_PORT}:3000 \
-              ${IMAGE}:${TAG}
-          """
-        }
+          # HOST_PORT:3000 — the right-hand side is the port INSIDE the
+          # container, and the image fixes that at 3000 (ENV PORT=3000 in
+          # the Dockerfile). Only the left-hand side is ours to choose.
+          docker run -d \
+            --name ${CONTAINER} \
+            --restart unless-stopped \
+            -p ${HOST_PORT}:3000 \
+            ${IMAGE}:${TAG}
+        """
       }
     }
 
     stage('Smoke test') {
-      when { expression { return params.DEPLOY } }
       steps {
         // Polls the login page rather than sleeping a fixed time: the
         // container is ready when it answers, not when a timer says so.
         sh """
           for i in \$(seq 1 30); do
-            if curl -fsS -o /dev/null http://localhost:${params.HOST_PORT}/etms/Login; then
+            if curl -fsS -o /dev/null http://localhost:${HOST_PORT}/etms/Login; then
               echo "up after \${i}s"
               exit 0
             fi
@@ -166,7 +158,7 @@ pipeline {
 
   post {
     success {
-      echo "Deployed ${IMAGE}:${TAG} (${env.GIT_SHA}) on port ${params.HOST_PORT}"
+      echo "Deployed ${IMAGE}:${TAG} (${env.GIT_SHA}) on port ${HOST_PORT}"
     }
     failure {
       // The builder tag is the expensive one; keep the last good runtime image
