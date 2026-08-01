@@ -13,7 +13,7 @@ under `d:\Rishikesh\dashboards` needs to change.
 |---|---|---|
 | Repo | `itswsupport/Training-Management_UI` | `REPL-IT-Projects/etms` |
 | Branch | `master` | `master` |
-| Jenkinsfile path | `Jenkinsfile` | **`etms/Jenkinsfile`** (repo root is an Eclipse workspace) |
+| Jenkinsfile path | `Jenkinsfile` | `Jenkinsfile` (at the repo root; the Maven project is in `etms/`) |
 | Image / container | `etms-ui` | `etms-backend` |
 | Host port | `3020` → 3000 | `8096` → 8096 |
 | Public path | `/etms` | not exposed — reached container-side only |
@@ -74,7 +74,9 @@ java -jar jenkins-cli.jar -s http://<jenkins>/ create-job etms-ui      < jenkins
 
 Or create two Pipeline jobs by hand — *Pipeline script from SCM*, Git, the repo
 URL, `*/master`, the checkout credential from the table above, and the script
-path. The backend's script path is **not** the default `Jenkinsfile`.
+path. Both jobs use Jenkins' default Script Path, `Jenkinsfile` — leave that
+field alone. The backend's Maven project lives in `etms/`, but its Jenkinsfile
+is deliberately at the repo root so no non-default Script Path is needed.
 
 **Neither job takes build parameters.** Every deployment value is fixed in the
 Jenkinsfile's `environment` block, so a deploy is reproducible from the commit
