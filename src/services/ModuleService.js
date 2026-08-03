@@ -112,12 +112,17 @@ export async function getCourseDetail(emoduleId) {
  * current draft's id keeps that path valid; with no draft we send no id and the
  * insert path creates a fresh module.
  *
- * @returns {Promise<number|null>}
+ * The draft's own `emoduleId` code travels back with the id: the UPDATE path
+ * rebuilds the whole row from the params, so the code has to be sent back or it
+ * is merged away as null (see `updateModuleDetails`).
+ *
+ * @returns {Promise<{id: number, code: string}|null>}
  */
-export async function getDraftModuleId() {
+export async function getDraftModule() {
   try {
     const draft = unwrap(await api.get("/emodule/status", { params: { status: 0 } }));
-    return draft?.id ?? null;
+    if (draft?.id == null) return null;
+    return { id: draft.id, code: clean(draft.emoduleId) };
   } catch {
     // No draft (or the lookup failed) → fall through to the insert path.
     return null;
@@ -141,7 +146,7 @@ export async function getDraftModuleId() {
  * @returns {Promise<number>} the saved module id
  */
 export async function saveModule(input) {
-  const draftId = await getDraftModuleId();
+  const draft = await getDraftModule();
   const { regDate, regTime } = nowStamp();
 
   const params = {
@@ -160,16 +165,24 @@ export async function saveModule(input) {
     "deptIdList[]": input.deptIds,
     "gradeIdList[]": input.gradeIds,
   };
-  if (draftId != null) params.id = String(draftId);
+  // Reusing the draft slot sends /emodule/save down its UPDATE path, which
+  // rebuilds the stored row from these params alone — so the existing course
+  // number has to go back with it. Omitting it nulls the column, and everything
+  // downstream that parses the code then fails (501). On the insert path there
+  // is no code yet and the backend generates one.
+  if (draft) {
+    params.id = String(draft.id);
+    if (draft.code) params.emoduleId = draft.code;
+  }
 
   const id = unwrap(await sendForm("/emodule/save", params));
   if (id == null) throw new Error("The training service did not return a module id.");
 
   // Reusing a draft slot can carry over sections from an earlier unfinished
   // attempt; clear them so this module starts clean. Best-effort.
-  if (draftId != null) {
+  if (draft) {
     try {
-      const sections = await getSections(draftId);
+      const sections = await getSections(draft.id);
       await Promise.all(sections.map((s) => deleteSection(s.id).catch(() => {})));
     } catch {
       /* ignore cleanup failures */
