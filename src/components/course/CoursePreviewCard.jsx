@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   BookOpen,
   CirclePlay,
@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 
 import CourseIncludes from "@/components/course/CourseIncludes";
+import useMaterialProgress from "@/hooks/useMaterialProgress";
 import { isFileVideoUrl, youTubeId } from "@/lib/video";
 import { materialUrl } from "@/services/ModuleService";
 
@@ -19,6 +20,44 @@ const WATCHED_TARGET = 0.9;
 
 /** Past this, playback is not watching — it earns no credit. */
 const MAX_SPEED = 1.25;
+
+/**
+ * Reports what a lecture video is worth and how much of it has gone by.
+ *
+ * Time is only counted while something is actually playing. This card sits on
+ * the course page whether or not anything is running, so a paused player in a
+ * focused tab would otherwise earn a learner minutes for a video nobody is
+ * watching — the same thing the coverage figures below exist to prevent.
+ *
+ * Absent `material` — the card's own trailer, or an officer looking around —
+ * nothing is reported and the hook stays dormant.
+ *
+ * @param {object|null} material `{empCode, emoduleId, sectionId, lectureId, kind}`
+ * @returns {{report: (stats: object) => void, setPlaying: (on: boolean) => void}}
+ *   `report` hands over what the next beat should carry; the players call it as
+ *   playback moves on.
+ */
+function useVideoProgress(material) {
+  const [playing, setPlaying] = useState(false);
+  const stats = useRef({
+    requiredSecs: 0,
+    coveragePct: 0,
+    position: 0,
+    lastPosition: 0,
+  });
+  const report = useCallback((next) => {
+    stats.current = next;
+  }, []);
+  const snapshot = useCallback(() => stats.current, []);
+
+  useMaterialProgress({
+    active: playing && Boolean(material?.lectureId),
+    material,
+    snapshot,
+  });
+
+  return { report, setPlaying };
+}
 
 /** The watched pill, in the same place whichever player is behind it. */
 function WatchedBadge({ coverage }) {
@@ -79,12 +118,14 @@ function loadYouTubeApi() {
  * behaviour and it is not good, but the alternative is an assignment nobody on
  * that network can ever unlock.
  */
-function TrackedYouTube({ videoId, title, onWatched }) {
+function TrackedYouTube({ videoId, title, onWatched, material }) {
   const holder = useRef(null);
   const seen = useRef(new Set());
+  const furthest = useRef(0);
   const reported = useRef(false);
   const [coverage, setCoverage] = useState(0);
   const [blocked, setBlocked] = useState(false);
+  const { report, setPlaying } = useVideoProgress(material);
 
   useEffect(() => {
     let player = null;
@@ -99,15 +140,31 @@ function TrackedYouTube({ videoId, title, onWatched }) {
 
     const sample = () => {
       // 1 is YT.PlayerState.PLAYING — paused, buffering and ended earn nothing.
-      if (player?.getPlayerState?.() !== 1) return;
+      const running = player?.getPlayerState?.() === 1;
+      // The heartbeat is told either way: this poll is the only thing that knows
+      // whether the embed is running, and a video paused mid-lecture must stop
+      // earning time.
+      setPlaying(running);
+      if (!running) return;
       if (player.getPlaybackRate?.() > MAX_SPEED) return;
 
       const total = Math.floor(player.getDuration?.() || 0);
       if (!total) return;
 
-      seen.current.add(Math.floor(player.getCurrentTime()));
+      const at = Math.floor(player.getCurrentTime());
+      seen.current.add(at);
+      furthest.current = Math.max(furthest.current, at);
+
       const percent = Math.min(100, Math.round((seen.current.size / total) * 100));
       setCoverage((shown) => (shown === percent ? shown : percent));
+
+      report({
+        requiredSecs: Math.round(total * WATCHED_TARGET),
+        coveragePct: percent,
+        position: furthest.current,
+        lastPosition: at,
+      });
+
       if (seen.current.size / total >= WATCHED_TARGET) finish();
     };
 
@@ -141,7 +198,10 @@ function TrackedYouTube({ videoId, title, onWatched }) {
       if (poll) clearInterval(poll);
       player?.destroy?.();
     };
-  }, [videoId, onWatched]);
+    // `report` and `setPlaying` are stable for the life of the component, so
+    // naming them here cannot rebuild the player — which must not happen, as it
+    // would drop the seconds already watched.
+  }, [videoId, onWatched, report, setPlaying]);
 
   // With the API out of reach there is nothing to report on, so the plain embed
   // goes back in and the badge stays off rather than showing a figure that
@@ -181,10 +241,12 @@ function TrackedYouTube({ videoId, title, onWatched }) {
  * `onWatched` fires once, when enough of it has genuinely gone by. It is absent
  * for the card's own course preview — that is a trailer, not coursework.
  */
-function TrackedVideo({ src, onWatched }) {
+function TrackedVideo({ src, onWatched, material }) {
   const seen = useRef(new Set());
+  const furthest = useRef(0);
   const reported = useRef(false);
   const [coverage, setCoverage] = useState(0);
+  const { report, setPlaying } = useVideoProgress(material);
 
   const handleTimeUpdate = (event) => {
     const video = event.currentTarget;
@@ -192,10 +254,21 @@ function TrackedVideo({ src, onWatched }) {
     if (!total || video.paused || video.seeking) return;
     if (video.playbackRate > MAX_SPEED) return;
 
-    seen.current.add(Math.floor(video.currentTime));
+    const at = Math.floor(video.currentTime);
+    seen.current.add(at);
+    furthest.current = Math.max(furthest.current, at);
 
     const percent = Math.min(100, Math.round((seen.current.size / total) * 100));
     setCoverage((shown) => (shown === percent ? shown : percent));
+
+    // What the beat will carry. Coverage is the unique seconds actually seen,
+    // not the clock — the same figure the badge shows, for the same reason.
+    report({
+      requiredSecs: Math.round(total * WATCHED_TARGET),
+      coveragePct: percent,
+      position: furthest.current,
+      lastPosition: at,
+    });
 
     if (!reported.current && seen.current.size / total >= WATCHED_TARGET) {
       reported.current = true;
@@ -211,6 +284,9 @@ function TrackedVideo({ src, onWatched }) {
         playsInline
         preload="metadata"
         onTimeUpdate={onWatched ? handleTimeUpdate : undefined}
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => setPlaying(false)}
         className="h-full w-full bg-black object-contain"
       />
       {/* Said out loud, so the requirement is not a trap the learner only
@@ -314,6 +390,7 @@ export default function CoursePreviewCard({ course, active = null }) {
             key={videoUrl}
             src={videoUrl}
             onWatched={preview?.onWatched}
+            material={preview?.material}
           />
         ) : playing && videoId ? (
           <TrackedYouTube
@@ -323,6 +400,7 @@ export default function CoursePreviewCard({ course, active = null }) {
             videoId={videoId}
             title={`Preview: ${course.name}`}
             onWatched={preview?.onWatched}
+            material={preview?.material}
           />
         ) : (
           // Thumbnail state: a button for the embeddable case (it plays in

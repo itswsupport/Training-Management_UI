@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ExternalLink, X } from "lucide-react";
 
 import PdfReader from "@/components/course/PdfReader";
+import useMaterialProgress from "@/hooks/useMaterialProgress";
 
 /** Past this many rows a workbook is shown in part; see SheetView. */
 const ROW_LIMIT = 500;
@@ -80,10 +81,45 @@ function ReadBadge({ done, label }) {
  * @param {() => void} [props.onRead] called once the material has actually been
  *   read — every page of a PDF, or enough time on a sheet or a picture. Absent
  *   for an officer, who is checking the material rather than working through it.
+ * @param {object} [props.material] who is reading what, as
+ *   `{empCode, emoduleId, sectionId, lectureId, kind}`. Present only for a
+ *   learner: it is what the time spent here is reported against, and an officer
+ *   browsing the material has no progress to record.
  * @param {() => void} props.onClose
  */
-export default function MaterialViewer({ kind, name, url, onRead, onClose }) {
+export default function MaterialViewer({
+  kind,
+  name,
+  url,
+  onRead,
+  material,
+  onClose,
+}) {
   const box = useContentBox();
+
+  /**
+   * How far through the material the learner is, as the body last reported it.
+   *
+   * Kept in a ref rather than state because only the heartbeat ever reads it —
+   * re-rendering the panel every time a page turns would buy nothing and cost a
+   * repaint of the document underneath.
+   */
+  const coverage = useRef({
+    requiredSecs: 0,
+    coveragePct: 0,
+    position: 0,
+    lastPosition: 0,
+  });
+  const report = useCallback((next) => {
+    coverage.current = next;
+  }, []);
+  const snapshot = useCallback(() => coverage.current, []);
+
+  useMaterialProgress({
+    active: Boolean(material?.lectureId),
+    material,
+    snapshot,
+  });
 
   useEffect(() => {
     const onKey = (event) => {
@@ -134,11 +170,11 @@ export default function MaterialViewer({ kind, name, url, onRead, onClose }) {
       </div>
 
       {kind === "sheet" ? (
-        <SheetView url={url} onRead={onRead} />
+        <SheetView url={url} onRead={onRead} onCoverage={report} />
       ) : kind === "image" ? (
-        <ImageView url={url} name={name} onRead={onRead} />
+        <ImageView url={url} name={name} onRead={onRead} onCoverage={report} />
       ) : (
-        <PdfView url={url} onRead={onRead} />
+        <PdfView url={url} onRead={onRead} onCoverage={report} />
       )}
     </div>,
     document.body
@@ -233,7 +269,7 @@ function Failed() {
   return (
     <div className="flex flex-1 items-center justify-center bg-white p-6">
       <p className="text-center text-[13px] normal-case text-[#dc3545]">
-        This file could not be opened here — use the download button above.
+        File Not Available
       </p>
     </div>
   );
@@ -260,9 +296,25 @@ const imageType = (name) =>
  * with how the file is served — and the page count it finds is what decides
  * whether the document has been read.
  */
-function PdfView({ url, onRead }) {
+function PdfView({ url, onRead, onCoverage }) {
   const file = useMaterialBytes(url);
   const [pages, setPages] = useState({ read: 0, total: 0 });
+
+  // A PDF is measured in pages, not seconds — there is no fixed time it is
+  // worth, so the server is handed coverage and left to decide.
+  useEffect(() => {
+    onCoverage?.({
+      requiredSecs: 0,
+      coveragePct: pages.total
+        ? Math.round((pages.read / pages.total) * 100)
+        : 0,
+      // The reader counts pages seen rather than tracking which page is on
+      // screen, so how far they have got and where they are are the same
+      // number here.
+      position: pages.read,
+      lastPosition: pages.read,
+    });
+  }, [pages, onCoverage]);
 
   if (file.status === "error") return <Failed />;
   if (file.status !== "ready") return <Loading />;
@@ -292,9 +344,20 @@ function PdfView({ url, onRead }) {
 }
 
 /** A picture, shown at its own size within the space it has. */
-function ImageView({ url, name, onRead }) {
+function ImageView({ url, name, onRead, onCoverage }) {
   const file = useMaterialBytes(url);
   const progress = useDwell(IMAGE_SECONDS, onRead);
+
+  // A picture has no pages to walk through, so time in front of it is the whole
+  // of its coverage.
+  useEffect(() => {
+    onCoverage?.({
+      requiredSecs: IMAGE_SECONDS,
+      coveragePct: progress,
+      position: 0,
+      lastPosition: 0,
+    });
+  }, [progress, onCoverage]);
 
   // Built as the bytes arrive rather than in an effect, so the picture is on
   // screen in the same render they land in.
@@ -335,12 +398,22 @@ function ImageView({ url, name, onRead }) {
  * The parser is loaded on demand: it is by far the heaviest thing on this
  * screen, and the great majority of material is PDF that never needs it.
  */
-function SheetView({ url, onRead }) {
+function SheetView({ url, onRead, onCoverage }) {
   const file = useMaterialBytes(url);
   const [sheets, setSheets] = useState(null);
   const [unreadable, setUnreadable] = useState(false);
   const [active, setActive] = useState(0);
   const progress = useDwell(SHEET_SECONDS, onRead);
+
+  // As with a picture: dwell time is all there is to measure.
+  useEffect(() => {
+    onCoverage?.({
+      requiredSecs: SHEET_SECONDS,
+      coveragePct: progress,
+      position: 0,
+      lastPosition: 0,
+    });
+  }, [progress, onCoverage]);
 
   useEffect(() => {
     if (file.status !== "ready") return undefined;

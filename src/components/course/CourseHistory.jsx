@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ArrowRight } from "lucide-react";
 
 import { apiErrorMessage } from "@/config/api";
+import { getEmployeeNames } from "@/services/MasterDataService";
 import {
   getTransactions,
   withoutCreationRun,
@@ -55,6 +56,7 @@ function FieldChange({ change }) {
  */
 export default function CourseHistory({ emoduleId }) {
   const [rows, setRows] = useState([]);
+  const [names, setNames] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showAll, setShowAll] = useState(false);
@@ -66,9 +68,25 @@ export default function CourseHistory({ emoduleId }) {
       // Building the course is not an edit of it — a module that has only just
       // been created starts with an empty history and fills from its first
       // real change onward.
-      setRows(
-        withoutCreationRun(await getTransactions({ emoduleId, onlyEdits: true }))
+      const history = withoutCreationRun(
+        await getTransactions({ emoduleId, onlyEdits: true })
       );
+      setRows(history);
+
+      // Only worth a request when the backend has actually left somebody as a
+      // bare code; a history it named in full needs no roster.
+      //
+      // Deliberately not awaited: the history is the record and should be on
+      // screen as soon as it arrives, with the codes it came with. Waiting on
+      // the roster would hold the whole table behind a second round trip to put
+      // a nicer word in one column. The names drop in when they land.
+      if (history.some((row) => !row.actionByNamed && row.actionBy)) {
+        getEmployeeNames()
+          .then(setNames)
+          // The roster is a courtesy, not the record. Failing to reach it
+          // leaves the codes showing rather than taking the history down.
+          .catch(() => {});
+      }
     } catch (err) {
       setRows([]);
       setError(apiErrorMessage(err, "Could not load this course's edit history."));
@@ -76,6 +94,16 @@ export default function CourseHistory({ emoduleId }) {
       setLoading(false);
     }
   }, [emoduleId]);
+
+  /**
+   * Who made this change. The backend's own name wins where it has one; the
+   * rest are looked up by code, and an officer no longer on the roster keeps
+   * their code so the column is never empty.
+   */
+  const editedBy = (row) =>
+    row.actionByNamed
+      ? row.actionByName
+      : (names?.get(String(row.actionBy)) ?? row.actionByName);
 
   useEffect(() => {
     load();
@@ -118,10 +146,11 @@ export default function CourseHistory({ emoduleId }) {
                 <thead>
                   <tr className="bg-[#f8f9fa] text-[#3482AE]">
                     <th className={th}>Sr No</th>
-                    <th className={th}>Date / Time</th>
                     <th className={th}>Change</th>
                     <th className={th}>Changed By</th>
                     <th className={th}>What Changed</th>
+                    <th className={th}>Date</th>
+                    <th className={th}>Time</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -133,7 +162,6 @@ export default function CourseHistory({ emoduleId }) {
                       <td className={`${td} font-semibold text-gray-500`}>
                         {i + 1}
                       </td>
-                      <td className={`${td} whitespace-nowrap`}>{row.when}</td>
                       <td className={td}>
                         <span
                           className={`inline-block rounded px-2 py-1 text-[11px] font-semibold whitespace-nowrap ${
@@ -143,7 +171,7 @@ export default function CourseHistory({ emoduleId }) {
                           {row.actionText}
                         </span>
                       </td>
-                      <td className={`${td} normal-case`}>{row.actionByName}</td>
+                      <td className={`${td} normal-case`}>{editedBy(row)}</td>
                       <td className={td}>
                         {/* A module edit lists its fields; a section or question
                             edit has no field diff, only what it did. */}
@@ -158,6 +186,12 @@ export default function CourseHistory({ emoduleId }) {
                             {row.description || "—"}
                           </span>
                         )}
+                      </td>
+                      <td className={`${td} whitespace-nowrap`}>
+                        {row.whenDate || "—"}
+                      </td>
+                      <td className={`${td} whitespace-nowrap`}>
+                        {row.whenTime || "—"}
                       </td>
                     </tr>
                   ))}

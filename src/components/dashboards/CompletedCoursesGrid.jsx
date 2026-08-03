@@ -172,7 +172,7 @@ export default function CompletedCoursesGrid({
             enableColumnFilters
             enableGlobalFilter
             compact={true}
-            initialState={{ density: "compact", showGlobalFilter: true }}
+            initialState={{ density: "compact" }}
             muiTablePaperProps={{ elevation: 0 }}
             muiTableBodyRowProps={{
               hover: false,
