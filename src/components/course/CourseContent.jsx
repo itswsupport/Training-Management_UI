@@ -18,6 +18,7 @@ import {
   isAssignmentSubmitted,
 } from "@/services/AssignmentService";
 import { isEmbeddableVideo } from "@/lib/video";
+import { MATERIAL_KINDS } from "@/services/ProgressService";
 import { materialUrl } from "@/services/ModuleService";
 import { fileName } from "@/utils/etmsFormat";
 
@@ -364,11 +365,17 @@ export default function CourseContent({
    * An officer is checking the material rather than working through it, so they
    * are given no way to record having read it.
    */
-  const openInPage = (key, material) => {
+  const openInPage = (key, material, where) => {
     setViewing({
       name: material.name,
       url: material.href,
       kind: material.viewer,
+      // The backend ids behind this material, so the time spent on it can be
+      // reported against the right lecture. The browser ticks below are keyed on
+      // `lectureKey`, which falls back to array positions for rows the backend
+      // left without an id — those cannot be reported, and are left out here.
+      sectionId: where?.sectionId,
+      lectureId: where?.lectureId,
       onRead: preview
         ? null
         : () => markWatched(materialKey(key, material.id)),
@@ -388,7 +395,7 @@ export default function CourseContent({
    * and is ticked here, because there is nothing on the other side of it that
    * could ever report back.
    */
-  const playInCard = (key, material, lectureName) => {
+  const playInCard = (key, material, lectureName, where) => {
     const tracked =
       material.kind === "video" || isEmbeddableVideo(material.href);
     if (!tracked) markWatched(materialKey(key, material.id));
@@ -400,6 +407,22 @@ export default function CourseContent({
       onWatched: tracked
         ? () => markWatched(materialKey(key, material.id))
         : null,
+      // Only a video the card can actually measure has anything to report, and
+      // only for a learner — an officer previewing the content records nothing.
+      // A link that opens in a tab is unreachable from here either way.
+      material:
+        tracked && !preview && where?.lectureId
+          ? {
+              empCode,
+              emoduleId,
+              sectionId: where.sectionId,
+              lectureId: where.lectureId,
+              kind:
+                material.kind === "video"
+                  ? MATERIAL_KINDS.VIDEO
+                  : MATERIAL_KINDS.LINK,
+            }
+          : null,
     });
   };
 
@@ -668,7 +691,10 @@ export default function CourseContent({
                               <button
                                 type="button"
                                 onClick={() =>
-                                  playInCard(key, nextMaterial, lecture.name)
+                                  playInCard(key, nextMaterial, lecture.name, {
+                                    sectionId: section.id,
+                                    lectureId: lecture.id,
+                                  })
                                 }
                                 className="cursor-pointer rounded bg-[#3482AE] px-3 py-1.5 text-[11px] font-bold tracking-wide text-white uppercase transition-colors hover:bg-[#2b6b90]"
                               >
@@ -677,7 +703,12 @@ export default function CourseContent({
                             ) : nextMaterial.viewer ? (
                               <button
                                 type="button"
-                                onClick={() => openInPage(key, nextMaterial)}
+                                onClick={() =>
+                                  openInPage(key, nextMaterial, {
+                                    sectionId: section.id,
+                                    lectureId: lecture.id,
+                                  })
+                                }
                                 className="cursor-pointer rounded bg-[#3482AE] px-3 py-1.5 text-[11px] font-bold tracking-wide text-white uppercase transition-colors hover:bg-[#2b6b90]"
                               >
                                 {materialAction(nextMaterial)}
@@ -719,12 +750,19 @@ export default function CourseContent({
                                 inPage={Boolean(viewerFor(lecture.materialFile))}
                                 href={materialUrl(lecture.materialFile)}
                                 onOpen={() =>
-                                  openInPage(key, {
-                                    id: "file",
-                                    href: materialUrl(lecture.materialFile),
-                                    name: fileName(lecture.materialFile),
-                                    viewer: viewerFor(lecture.materialFile),
-                                  })
+                                  openInPage(
+                                    key,
+                                    {
+                                      id: "file",
+                                      href: materialUrl(lecture.materialFile),
+                                      name: fileName(lecture.materialFile),
+                                      viewer: viewerFor(lecture.materialFile),
+                                    },
+                                    {
+                                      sectionId: section.id,
+                                      lectureId: lecture.id,
+                                    }
+                                  )
                                 }
                                 onTabOpen={() =>
                                   markWatched(materialKey(key, "file"))
@@ -759,7 +797,11 @@ export default function CourseContent({
                                       kind: "video",
                                       href: materialUrl(lecture.materialVideo),
                                     },
-                                    lecture.name
+                                    lecture.name,
+                                    {
+                                      sectionId: section.id,
+                                      lectureId: lecture.id,
+                                    }
                                   )
                                 }
                                 onTabOpen={() =>
@@ -788,7 +830,11 @@ export default function CourseContent({
                                   playInCard(
                                     key,
                                     { id: "link", kind: "link", href: lecture.link },
-                                    lecture.name
+                                    lecture.name,
+                                    {
+                                      sectionId: section.id,
+                                      lectureId: lecture.id,
+                                    }
                                   )
                                 }
                                 onTabOpen={() =>
@@ -905,6 +951,19 @@ export default function CourseContent({
         name={viewing.name}
         url={viewing.url}
         onRead={viewing.onRead}
+        // An officer is checking the material, not working through it, so
+        // nothing they open is reported — the same reason they get no tick.
+        material={
+          preview || !viewing.lectureId
+            ? null
+            : {
+                empCode,
+                emoduleId,
+                sectionId: viewing.sectionId,
+                lectureId: viewing.lectureId,
+                kind: MATERIAL_KINDS.FILE,
+              }
+        }
         onClose={() => setViewing(null)}
       />
     ) : null}

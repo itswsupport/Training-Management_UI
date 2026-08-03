@@ -73,6 +73,34 @@ export function quarterMeta(quarter, year = new Date().getFullYear()) {
  *   defaultQuarter: string
  * }>}
  */
+/**
+ * `/instructor/employee/list` returns raw `[firstName, lastName, empCode]`
+ * tuples for serving employees only.
+ */
+const toEmployee = (row) => {
+  const name = `${clean(row?.[0])} ${clean(row?.[1])}`.replace(/\s+/g, " ").trim();
+  const code = clean(row?.[2]);
+  return { name, code, label: code ? `${name} (${code})` : name };
+};
+
+/**
+ * Employee code → name, for the columns the backend hands over as a bare code.
+ *
+ * The roster is serving employees only, so an officer who has since left will
+ * not be in it — callers keep the code as the fallback rather than showing a
+ * blank where a name should be.
+ *
+ * @returns {Promise<Map<string, string>>}
+ */
+export async function getEmployeeNames() {
+  const list = unwrap(await api.get("/instructor/employee/list"), []) ?? [];
+  const byCode = new Map();
+  list.map(toEmployee).forEach(({ name, code }) => {
+    if (code && name) byCode.set(code, name);
+  });
+  return byCode;
+}
+
 export async function getModuleFormOptions() {
   const [cat, inst, dept, grade] = await Promise.all([
     api.get("/category/list"),
@@ -81,16 +109,10 @@ export async function getModuleFormOptions() {
     api.get("/grade/list"),
   ]);
 
-  // The instructor endpoint returns raw [firstName, lastName, empCode] tuples
-  // for serving employees only. Names repeat across the company, so the code is
-  // part of what is shown and stored — it is the only way to tell two
-  // instructors of the same name apart.
+  // Names repeat across the company, so the code is part of what is shown and
+  // stored — it is the only way to tell two instructors of the same name apart.
   const instructors = (unwrap(inst, []) ?? [])
-    .map((row) => {
-      const name = `${clean(row?.[0])} ${clean(row?.[1])}`.replace(/\s+/g, " ").trim();
-      const code = clean(row?.[2]);
-      return { name, code, label: code ? `${name} (${code})` : name };
-    })
+    .map(toEmployee)
     .filter((i) => i.name.length > 0)
     .sort((a, b) => a.label.localeCompare(b.label));
 

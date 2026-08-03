@@ -84,7 +84,10 @@ const DISPLAY_TIME_ZONE = "Asia/Kolkata";
 const to12Hour = (hour) => String(hour % 12 || 12).padStart(2, "0");
 
 /**
- * `28-07-2026 04:35 PM` for one history row.
+ * `{date: "28-07-2026", time: "04:35 PM"}` for one history row.
+ *
+ * Kept apart rather than as one string because the grid gives them a column
+ * each; `when` below joins them back for the callers that want the phrase.
  *
  * A row carries the same moment twice: an instant, which the backend serialises
  * in UTC (`2026-07-30T06:55:13.000+00:00`), and its own local date and time
@@ -99,7 +102,7 @@ const to12Hour = (hour) => String(hour % 12 || 12).padStart(2, "0");
 const formatStamp = (instant, localDate, localTime) =>
   fromLocalPair(localDate, localTime) ?? fromInstant(instant);
 
-/** `2026-07-30` + `12:25 pm` (or `12:25`) → `30-07-2026 12:25 PM`. */
+/** `2026-07-30` + `12:25 pm` (or `12:25`) → `30-07-2026` and `12:25 PM`. */
 function fromLocalPair(date, time) {
   const [y, m, d] = clean(date).split("-");
   const parts = clean(time).match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*([AaPp][Mm])?$/);
@@ -111,7 +114,10 @@ function fromLocalPair(date, time) {
     hour %= 12;
     if (/p/i.test(meridiem)) hour += 12;
   }
-  return `${d}-${m}-${y} ${to12Hour(hour)}:${minute} ${hour >= 12 ? "PM" : "AM"}`;
+  return {
+    date: `${d}-${m}-${y}`,
+    time: `${to12Hour(hour)}:${minute} ${hour >= 12 ? "PM" : "AM"}`,
+  };
 }
 
 /**
@@ -121,7 +127,9 @@ function fromLocalPair(date, time) {
 function fromInstant(value) {
   const text = clean(value);
   const parsed = Date.parse(text);
-  if (Number.isNaN(parsed)) return text;
+  // Unreadable: show it as it came rather than inventing a date, and leave the
+  // time empty so the column says nothing instead of something wrong.
+  if (Number.isNaN(parsed)) return { date: text, time: "" };
 
   const parts = Object.fromEntries(
     new Intl.DateTimeFormat("en-GB", {
@@ -139,9 +147,10 @@ function fromInstant(value) {
 
   // Midnight comes back as hour 24 from some engines.
   const hour = Number(parts.hour) % 24;
-  return `${parts.day}-${parts.month}-${parts.year} ${to12Hour(hour)}:${
-    parts.minute
-  } ${hour >= 12 ? "PM" : "AM"}`;
+  return {
+    date: `${parts.day}-${parts.month}-${parts.year}`,
+    time: `${to12Hour(hour)}:${parts.minute} ${hour >= 12 ? "PM" : "AM"}`,
+  };
 }
 
 /**
@@ -233,12 +242,18 @@ export async function getTransactions(filters = {}) {
 
   const list = unwrap(await api.get("/emodule/transaction/list", { params }), []) ?? [];
 
-  return list.map((row, index) => ({
+  return list.map((row, index) => {
+    const stamp = formatStamp(row?.[1], row?.[16], row?.[17]);
+    return {
     id: row?.[0] ?? index,
     // Kept alongside the formatted stamp because grouping rows into a single
     // save run needs the gaps between them, not their display text.
     at: clean(row?.[1]),
-    when: formatStamp(row?.[1], row?.[16], row?.[17]),
+    // The two halves for the grid, and the phrase for the sentences elsewhere
+    // that read "…updated on 28-07-2026 04:35 PM".
+    whenDate: stamp.date,
+    whenTime: stamp.time,
+    when: `${stamp.date} ${stamp.time}`.trim(),
     action: clean(row?.[2]),
     actionText: actionLabel(row?.[2]),
     entity: clean(row?.[3]),
@@ -251,6 +266,12 @@ export async function getTransactions(filters = {}) {
     empName: clean(row?.[8]) || (row?.[7] ? String(row[7]) : "—"),
     actionBy: row?.[9] ?? null,
     actionByName: clean(row?.[10]) || (row?.[9] ? String(row[9]) : "—"),
+    // Whether that name came from the backend or is the employee code standing
+    // in for one. The officer is stored as a code and the join behind this
+    // column does not always find them, which is what leaves a history reading
+    // "101588" where a person's name belongs — see CourseHistory, which resolves
+    // the rest against the employee roster.
+    actionByNamed: Boolean(clean(row?.[10])),
     role: clean(row?.[11]),
     changedFields: clean(row?.[12]),
     oldValue: clean(row?.[13]),
@@ -262,7 +283,8 @@ export async function getTransactions(filters = {}) {
     atDate: clean(row?.[16]),
     atTime: clean(row?.[17]),
     changes: fieldChanges(row?.[12], row?.[13], row?.[14]),
-  }));
+    };
+  });
 }
 
 /**

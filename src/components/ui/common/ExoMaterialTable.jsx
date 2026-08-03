@@ -115,12 +115,12 @@ const ExoMaterialTable = ({
         },
       },
     },
-    // The stock clear button only empties the box — it never closes it, and
-    // every grid here opens the box on mount (showGlobalFilter in initialState)
-    // rather than behind the toolbar's magnifier. So pressing X appeared to do
-    // nothing once the text was already gone, and there was no obvious way to
-    // put the search bar away again. This one clears AND closes; the magnifier
-    // in the toolbar brings it back.
+    // The search box starts closed and is opened by the toolbar's magnifier.
+    //
+    // The stock clear button only empties the box, never closes it, so pressing
+    // X appeared to do nothing once the text was already gone. This one clears
+    // AND closes, so the same button always does something — and the magnifier
+    // toggles the box either way.
     muiSearchTextFieldProps: ({ table }) => ({
       sx: {
         fontFamily: fontFamily,
@@ -152,10 +152,11 @@ const ExoMaterialTable = ({
         ),
       },
     }),
-    // The stock toolbar drops the search toggle whenever `showGlobalFilter` is
-    // in initialState, on the assumption that a box which starts open never
-    // closes. Ours does close, so the button has to be here or there would be
-    // no way back. The rest of the row is MRT's own default set, in its order.
+    // Spelled out rather than left to MRT so the magnifier is guaranteed to be
+    // there: the stock toolbar drops it whenever `showGlobalFilter` is set in
+    // initialState, and a grid that opted back into that would otherwise lose
+    // the only way to close the box again. The rest of the row is MRT's own
+    // default set, in its order.
     renderToolbarInternalActions: ({ table }) => (
       <>
         <MRT_ToggleGlobalFilterButton table={table} />
