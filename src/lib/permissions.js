@@ -88,6 +88,22 @@ export function isTrainingOfficer(user) {
 export const PUBLIC_ROUTES = ["/Login", "/reset-password"];
 
 /**
+ * Pages that render on their own, with no sidebar and no header bar.
+ *
+ * The user manual opens in its own tab and is a document rather than a screen
+ * of the app — the shell's navigation around it would only be a second way out
+ * of something the reader did not navigate into. Still behind the session:
+ * chromeless is about the frame, not about who may read it.
+ */
+export const CHROMELESS_ROUTES = ["/user-guide"];
+
+export function isChromelessRoute(pathname) {
+  return CHROMELESS_ROUTES.some(
+    (route) => pathname === route || pathname.startsWith(`${route}/`)
+  );
+}
+
+/**
  * Route prefix → the roles allowed to open it. A prefix that is absent from
  * this map is open to every signed-in user (course pages, certificates).
  */
