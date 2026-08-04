@@ -4,6 +4,9 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { HelpCircle, LogOut, Menu } from "lucide-react";
 
+/** The manual page. Written out in full because it opens in a new tab. */
+const MANUAL_URL = `${process.env.NEXT_PUBLIC_BASE_PATH || "/etms"}/user-guide`;
+
 import { AppSidebar } from "@/components/app-sidebar";
 import ScrollFooter from "@/components/ScrollFooter";
 import { SidebarTrigger } from "@/components/ui/sidebar";
@@ -12,6 +15,7 @@ import {
   canAccessRoute,
   getAllUserRoles,
   getDefaultDashboardForUser,
+  isChromelessRoute,
   isPublicRoute,
 } from "@/lib/permissions";
 
@@ -84,6 +88,13 @@ export default function ProtectedLayout({ children }) {
     );
   }
 
+  // A document rather than a screen: no sidebar, no header bar, and it scrolls
+  // itself because there is no <main> around it to do so. The access checks
+  // above still ran, so this is the frame being dropped, not the guard.
+  if (isChromelessRoute(pathname)) {
+    return <div className="h-screen w-full overflow-auto">{children}</div>;
+  }
+
   return (
     <div className="flex flex-1 overflow-hidden">
       <AppSidebar />
@@ -96,8 +107,16 @@ export default function ProtectedLayout({ children }) {
             <Menu className="h-6 w-6" />
           </SidebarTrigger>
           <div className="flex items-center space-x-4">
+            {/* Opens in its own tab so whatever the user was part-way through
+                — a video, a half-answered assignment — is still there behind
+                it. A plain anchor rather than next/link: target="_blank" wants
+                a real navigation, and the basePath has to be written in either
+                way. The manual carries its own PDF download. */}
             <a
-              href="/user-guide"
+              href={MANUAL_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Open the ETMS user manual"
               className="flex items-center space-x-2 rounded px-3 py-1.5 transition-colors hover:bg-teal-500"
             >
               <HelpCircle className="h-5 w-5" />
