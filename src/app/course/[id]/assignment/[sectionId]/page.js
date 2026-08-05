@@ -10,6 +10,7 @@ import { useAuth } from "@/context/AuthContext";
 import { getEmpCode, isTrainingOfficer } from "@/lib/permissions";
 import {
   getAssignmentQuestions,
+  getSubmittedAnswers,
   isAssignmentSubmitted,
 } from "@/services/AssignmentService";
 import { getCourseDetail } from "@/services/ModuleService";
@@ -52,14 +53,18 @@ export default function AssignmentPage({ params }) {
   const [state, setState] = useState({ status: "loading" });
 
   /**
-   * There is no paper to sit — it is already in, or none was ever set.
+   * No paper was ever set for this section.
    *
-   * Nothing to say about either that is worth a screen of its own: the card
-   * that used to stand here carried one line and a link back to the course, so
-   * the learner is simply put back on the course instead. `replace` rather than
-   * `push`, or Back would land them straight back on this redirect.
+   * Nothing to say about that worth a screen of its own — the card that used to
+   * stand here carried one line and a link back — so the learner is simply put
+   * back on the course. `replace` rather than `push`, or Back would land them
+   * straight back on this redirect.
+   *
+   * An assignment already submitted no longer comes here: it used to be sent
+   * back the same way, which left a learner with no way to look at what they
+   * had answered. It now renders read-only with their own answers filled in.
    */
-  const nothingToSit = state.status === "submitted" || state.status === "empty";
+  const nothingToSit = state.status === "empty";
 
   useEffect(() => {
     if (nothingToSit) router.replace(`/course/${emoduleId}`);
@@ -93,9 +98,7 @@ export default function AssignmentPage({ params }) {
         ]);
         if (cancelled) return;
 
-        if (submitted) {
-          setState({ status: "submitted", sectionName: section.name });
-        } else if (questions.length === 0) {
+        if (questions.length === 0) {
           setState({ status: "empty" });
         } else {
           // The section's lectures, so each question can say which one it is
@@ -116,6 +119,13 @@ export default function AssignmentPage({ params }) {
               ? byLecture.get(lectureId)
               : questions;
 
+          // Only worth asking for once the paper is known to be in — an
+          // assignment still being sat has nothing to read back.
+          const answered = submitted
+            ? await getSubmittedAnswers(emoduleId, sectionId, empCode)
+            : null;
+          if (cancelled) return;
+
           setState({
             status: "ready",
             course,
@@ -123,6 +133,8 @@ export default function AssignmentPage({ params }) {
             allQuestions: questions,
             lectureNames,
             lectureName: lectureId ? lectureNames[lectureId] : "",
+            submitted,
+            answered,
           });
         }
       } catch (err) {
@@ -168,6 +180,8 @@ export default function AssignmentPage({ params }) {
       lectureNames={state.lectureNames}
       lectureName={state.lectureName}
       readOnly={readOnly}
+      submitted={state.submitted}
+      initialAnswers={state.answered}
     />
   );
 }

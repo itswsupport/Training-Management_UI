@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  BookOpen,
   CirclePlay,
   ExternalLink,
   Pause,
@@ -13,10 +12,19 @@ import {
 import CourseIncludes from "@/components/course/CourseIncludes";
 import useMaterialProgress from "@/hooks/useMaterialProgress";
 import { isFileVideoUrl, youTubeId } from "@/lib/video";
-import { materialUrl } from "@/services/ModuleService";
 
-/** How much of a video has to have gone by before it counts as watched. */
-const WATCHED_TARGET = 0.9;
+/** Inlined at build time; the watch link is a plain anchor and needs it. */
+const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || "/etms";
+
+/**
+ * How much of a video has to have gone by before it counts as watched.
+ *
+ * Exported with the two players below because the watch page — what OPEN IN NEW
+ * TAB now opens — plays the same lecture under the same rules. Pointing that
+ * button at the video file itself put the lecture in a tab running none of our
+ * code, so a learner could watch the whole thing and earn nothing.
+ */
+export const WATCHED_TARGET = 0.9;
 
 /** Past this, playback is not watching — it earns no credit. */
 const MAX_SPEED = 1.25;
@@ -118,7 +126,7 @@ function loadYouTubeApi() {
  * behaviour and it is not good, but the alternative is an assignment nobody on
  * that network can ever unlock.
  */
-function TrackedYouTube({ videoId, title, onWatched, material }) {
+export function TrackedYouTube({ videoId, title, onWatched, material }) {
   const holder = useRef(null);
   const seen = useRef(new Set());
   const furthest = useRef(0);
@@ -241,7 +249,7 @@ function TrackedYouTube({ videoId, title, onWatched, material }) {
  * `onWatched` fires once, when enough of it has genuinely gone by. It is absent
  * for the card's own course preview — that is a trailer, not coursework.
  */
-function TrackedVideo({ src, onWatched, material }) {
+export function TrackedVideo({ src, onWatched, material }) {
   const seen = useRef(new Set());
   const furthest = useRef(0);
   const reported = useRef(false);
@@ -297,43 +305,21 @@ function TrackedVideo({ src, onWatched, material }) {
 }
 
 /**
- * The course's own preview video, taken from its content: the first lecture
- * with an external video link, else the first uploaded video. Null when the
- * course has no video at all. The lecture's name comes with it, so the card can
- * say what is about to play.
- */
-function coursePreviewVideo(course) {
-  for (const s of course.sections) {
-    for (const l of s.lectures) {
-      if (l.link) return { url: l.link, lecture: l.name, uploaded: false };
-    }
-  }
-  for (const s of course.sections) {
-    for (const l of s.lectures) {
-      if (l.materialVideo) {
-        return {
-          url: materialUrl(l.materialVideo),
-          lecture: l.name,
-          uploaded: true,
-        };
-      }
-    }
-  }
-  return null;
-}
-
-/**
- * Top-right "Preview this course" card. The video comes from THIS course's own
- * content, so it changes per course, and it plays *here* rather than throwing
- * the learner out to another tab: YouTube lectures embed on click, uploaded
- * ones play in the browser's own player. A link we cannot embed (a Vimeo or
- * Drive page, say) keeps the open-in-a-new-tab behaviour. Courses without any
- * video show a branded placeholder instead of a dead play button.
+ * Top-right player card. It plays whatever the learner picked out of COURSE
+ * CONTENT, and nothing until they pick something: a YouTube lecture embeds, an
+ * uploaded one plays in the browser's own player, and a link we cannot embed (a
+ * Vimeo or Drive page, say) keeps the open-in-a-new-tab behaviour.
+ *
+ * The card used to fill itself with the course's first lecture as a trailer,
+ * which was the same file the lecture itself served — so playing it looked
+ * identical to working through lecture one, and recorded nothing, because a
+ * trailer is deliberately given no `onWatched`. Starting empty means every video
+ * the card ever plays arrived through `playInCard`, and so is always counted.
  */
 export default function CoursePreviewCard({ course, active = null }) {
-  // `active` is a lecture the learner picked out of the course content list;
-  // with none picked the card falls back to the course's own first video.
-  const preview = active ?? coursePreviewVideo(course);
+  // The lecture the learner picked out of the course content list. Null until
+  // they pick one, and the card stays empty until they do.
+  const preview = active;
   const videoUrl = preview?.url ?? null;
   const videoId = videoUrl && !preview.uploaded ? youTubeId(videoUrl) : null;
   const fileVideo = Boolean(
@@ -341,6 +327,19 @@ export default function CoursePreviewCard({ course, active = null }) {
   );
   // Embeddable = we can show it inside the card. Everything else opens out.
   const embeddable = Boolean(videoId) || fileVideo;
+
+  // Where OPEN IN NEW TAB goes for a lecture whose watching is measured. Null
+  // for an officer (who records nothing) and for a link the card cannot play,
+  // and the raw URL is used instead in both cases.
+  //
+  // The basePath is written in by hand: this is a plain anchor, because
+  // target="_blank" wants a real navigation, and next/link is what would
+  // otherwise have added it. Without it the tab opens /course/... and 404s.
+  const tracked = preview?.material;
+  const watchHref =
+    tracked && embeddable
+      ? `${BASE_PATH}/course/${tracked.emoduleId}/watch/${tracked.lectureId}`
+      : null;
 
   const [playing, setPlaying] = useState(false);
   const cardRef = useRef(null);
@@ -374,10 +373,12 @@ export default function CoursePreviewCard({ course, active = null }) {
           the same size and nothing on the page jumps when playback starts. */}
       <div className="relative aspect-video w-full shrink-0 bg-gray-900">
         {!videoUrl ? (
+          // Nothing picked yet. A blank panel reads as broken, so the card says
+          // what it is waiting for.
           <div className="flex h-full flex-col items-center justify-center gap-2 bg-gradient-to-br from-[#3482AE] to-[#2b6b90] px-4 text-center text-white">
-            <BookOpen className="h-8 w-8 opacity-90" />
-            <span className="line-clamp-2 text-[13px] font-semibold normal-case">
-              {course.name}
+            <CirclePlay className="h-8 w-8 opacity-90" />
+            <span className="text-[13px] font-semibold normal-case">
+              Pick a lecture from Course Content to play it here
             </span>
           </div>
         ) : fileVideo ? (
@@ -451,8 +452,10 @@ export default function CoursePreviewCard({ course, active = null }) {
       ) : null}
 
       <div className="flex flex-1 flex-col p-4">
-        {/* The one "this course includes" list on the page — it used to be here
-            and again under the description, saying nearly the same thing. */}
+        {/* The one "this course includes" list on the page. The course card
+            beside this one carried a second copy of it; `compact` is now the
+            narrow one-column layout, not a shorter list, so nothing was lost
+            when that duplicate came out. */}
         <CourseIncludes course={course} compact />
 
         <p className="mt-3 flex items-center gap-2.5 border-t border-gray-200 pt-3 text-[13px] normal-case text-gray-700">
@@ -482,8 +485,13 @@ export default function CoursePreviewCard({ course, active = null }) {
                 {playing ? "Stop Preview" : "Watch Preview"}
               </button>
             ) : null}
+            {/* A tracked lecture opens OUR watch page in the new tab, not the
+                video file: a tab showing a bare .mp4 runs none of our code, so
+                the whole lecture could be watched there for no credit. Only a
+                link we cannot play at all still goes straight to the browser,
+                and those are ticked on open because nothing can report back. */}
             <a
-              href={videoUrl}
+              href={watchHref ?? videoUrl}
               target="_blank"
               rel="noreferrer"
               className={

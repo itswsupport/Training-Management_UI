@@ -866,10 +866,16 @@ export default function CourseContent({
                                   start an assignment they had already sat, and
                                   only the page it opened admitted otherwise. */}
                               {sectionSubmitted ? (
-                                <span className="inline-flex items-center gap-1.5 rounded bg-[#20c997]/15 px-2.5 py-1 text-[11px] font-bold tracking-wide text-[#158765] uppercase">
+                                // A submitted assignment used to be a dead
+                                // badge, so a learner could never look back at
+                                // what they had answered. It opens read-only.
+                                <Link
+                                  href={`/course/${emoduleId}/assignment/${section.id}?lectureId=${lecture.id}`}
+                                  className="inline-flex items-center gap-1.5 rounded bg-[#20c997]/15 px-2.5 py-1 text-[11px] font-bold tracking-wide text-[#158765] uppercase transition-colors hover:bg-[#20c997]/25"
+                                >
                                   <CircleCheckBig className="h-3 w-3" />
-                                  Submitted
-                                </span>
+                                  Submitted — view answers
+                                </Link>
                               ) : lectureLocked ? (
                                 <span className="inline-flex items-center gap-1 text-gray-400">
                                   <Lock className="h-3 w-3" />
@@ -906,9 +912,12 @@ export default function CourseContent({
                     {sectionSubmitted ? (
                       <div className="flex items-center gap-3">
                         <CircleCheckBig className="h-4 w-4 shrink-0 text-[#20c997]" />
-                        <p className="text-[13px] font-semibold normal-case text-[#158765]">
-                          Assignment submitted
-                        </p>
+                        <Link
+                          href={`/course/${emoduleId}/assignment/${section.id}`}
+                          className="text-[13px] font-semibold normal-case text-[#158765] underline underline-offset-2 hover:text-[#12705a]"
+                        >
+                          Assignment submitted — view your answers
+                        </Link>
                       </div>
                     ) : assignmentLocked ? (
                       <div className="flex items-center gap-3">
