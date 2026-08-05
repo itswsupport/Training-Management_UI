@@ -40,6 +40,13 @@ function readAnswered(empCode, emoduleId, sectionId) {
   }
 }
 
+/**
+ * @param {boolean} [readOnly] a training officer checking the paper
+ * @param {boolean} [submitted] the learner looking back at a paper they have
+ *   already sat — the same inert form, but their own answers are filled in
+ * @param {Object<string, string>} [initialAnswers] what they answered, keyed by
+ *   question id
+ */
 export default function AssignmentForm({
   emoduleId,
   sectionId,
@@ -50,13 +57,19 @@ export default function AssignmentForm({
   lectureNames = {},
   lectureName = "",
   readOnly = false,
+  submitted = false,
+  initialAnswers = null,
 }) {
   const router = useRouter();
 
   // Falls back to the shown questions when the page did not narrow to a lecture.
   const sectionQuestions = allQuestions ?? questions;
 
-  const [answers, setAnswers] = useState({});
+  // Nothing can be answered or sent in either case: an officer is checking the
+  // paper, and a learner looking back has already sat it.
+  const inert = readOnly || submitted;
+
+  const [answers, setAnswers] = useState(() => initialAnswers ?? {});
   const [answeredBefore, setAnsweredBefore] = useState(() =>
     readAnswered(empCode, emoduleId, sectionId)
   );
@@ -206,7 +219,7 @@ export default function AssignmentForm({
       </div>
 
       {/* Says plainly why the button reads SAVE & CONTINUE rather than SUBMIT. */}
-      {!readOnly && !canFinalise ? (
+      {!inert && !canFinalise ? (
         <p className="mx-2 rounded border border-[#3482AE]/30 bg-[#eaf3f9] px-3 py-2 text-[12px] normal-case text-[#2f6685]">
           {outstanding} question{outstanding === 1 ? "" : "s"} in other lectures
           of this section are still unanswered. Your answers here are saved as
@@ -214,9 +227,15 @@ export default function AssignmentForm({
         </p>
       ) : null}
 
-      {/* A training officer opens this to check the paper, not to sit it, so the
-          options are inert and the SUBMIT / CANCEL pair is not rendered. */}
-      {readOnly ? (
+      {/* Both inert cases say why, because a form that quietly refuses to take a
+          click reads as broken. The SUBMIT / CANCEL pair is not rendered for
+          either. */}
+      {submitted ? (
+        <p className="mx-2 rounded border border-[#20c997] bg-[#20c997]/10 px-3 py-2.5 text-[12px] normal-case text-[#158765]">
+          You have already submitted this assignment. Your answers are shown
+          below for reference — it cannot be answered again.
+        </p>
+      ) : readOnly ? (
         <p className="mx-2 rounded border border-[#ffc107] bg-[#ffc107]/10 px-3 py-2.5 text-[12px] normal-case text-[#a17200]">
           Preview only. This assignment is filled in by the employees the course
           is assigned to, so no answers can be saved or submitted here.
@@ -244,7 +263,7 @@ export default function AssignmentForm({
                 <label
                   key={option.value}
                   className={`flex items-start gap-2 text-[12px] leading-snug uppercase ${
-                    readOnly ? "cursor-default" : "cursor-pointer"
+                    inert ? "cursor-default" : "cursor-pointer"
                   }`}
                 >
                   <input
@@ -253,7 +272,7 @@ export default function AssignmentForm({
                     value={option.value}
                     checked={answers[question.id] === option.value}
                     onChange={() => pick(question.id, option.value)}
-                    disabled={readOnly}
+                    disabled={inert}
                     className="mt-0.5 shrink-0 accent-[#3482AE]"
                   />
                   <span className="font-bold text-[#1f5f86]">
@@ -275,7 +294,7 @@ export default function AssignmentForm({
 
       <div className="h-16 border-t border-gray-200" />
 
-      {readOnly ? null : (
+      {inert ? null : (
         <div className="flex items-center justify-center gap-4 border-t border-gray-200 p-3">
           <button
             type="button"

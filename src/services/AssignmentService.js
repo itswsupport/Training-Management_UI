@@ -48,6 +48,37 @@ export async function getAssignmentQuestions(emoduleId, sectionId) {
     }));
 }
 
+/**
+ * The answers this learner already submitted for one section, keyed by question.
+ *
+ * `/submit_exam/save` records each answer as it is clicked, but nothing could
+ * read them back — so a submitted assignment was a dead end and the learner
+ * could not see what they had actually answered. The endpoint is scoped to the
+ * caller's own attempt and carries no correct answers, since the paper is shown
+ * read-only and cannot be sat again.
+ *
+ * @returns {Promise<Object<string, string>>} `{questionId: answer}`, empty when
+ *   nothing has been submitted
+ */
+export async function getSubmittedAnswers(emoduleId, sectionId, empCode) {
+  const list =
+    unwrap(
+      await api.get("/submit_exam/answers", {
+        params: { emoduleId, sectionId, empCode },
+      }),
+      []
+    ) ?? [];
+
+  const byQuestion = {};
+  list.forEach((row) => {
+    if (row?.questionId == null) return;
+    // The options are matched on their 1-based ordinal as a string, the same
+    // shape `getAssignmentQuestions` gives each option's `value`.
+    byQuestion[row.questionId] = String(row.answer ?? "");
+  });
+  return byQuestion;
+}
+
 /** True once the employee has submitted this section's assignment. */
 export async function isAssignmentSubmitted(emoduleId, sectionId, empCode) {
   const result = unwrap(

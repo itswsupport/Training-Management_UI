@@ -294,8 +294,8 @@ export const CHAPTERS = [
                 text: "carries the course code, its name, and pills for the category, the instructor and the date it is valid until.",
               },
               {
-                title: "The preview card, on the right",
-                text: "plays the course's own introduction video, and is where every lecture video you pick will play.",
+                title: "The player card, on the right",
+                text: "starts empty and plays whichever lecture video you pick from COURSE CONTENT. Nothing plays until you choose one, and only what plays here is counted.",
               },
               {
                 title: "Course description and what you will learn",

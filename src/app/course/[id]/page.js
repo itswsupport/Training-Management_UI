@@ -17,7 +17,6 @@ import CourseContent from "@/components/course/CourseContent";
 import CourseContentEditor from "@/components/course/CourseContentEditor";
 import CourseDetailsEditor from "@/components/course/CourseDetailsEditor";
 import CourseHistory from "@/components/course/CourseHistory";
-import CourseIncludes from "@/components/course/CourseIncludes";
 import CoursePreviewCard from "@/components/course/CoursePreviewCard";
 import RichText from "@/components/course/RichText";
 import TopicsCovered from "@/components/course/TopicsCovered";
@@ -333,13 +332,9 @@ export default function CourseViewPage({ params }) {
               </div>
             ) : null}
 
-            {/* The full "this course includes" list — and now the only place
-                the section and lecture counts are stated on this card. The
-                preview card beside it carries a trimmed copy, narrow enough
-                that it keeps only what the course itself contains. */}
-            <div className="border-t border-gray-200 pt-4">
-              <CourseIncludes course={course} />
-            </div>
+            {/* "This course includes" is NOT repeated here. It stands once, in
+                the player card beside this one, which now carries the whole
+                list rather than a trimmed copy of it. */}
           </div>
         </div>
 
