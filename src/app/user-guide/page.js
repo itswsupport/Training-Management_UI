@@ -112,6 +112,11 @@ function Block({ block }) {
           tiles={block.tiles}
           panel={block.panel}
           kind={block.kind}
+          badge={block.badge}
+          lecture={block.lecture}
+          note={block.note}
+          progress={block.progress}
+          rows={block.rows}
         />
       );
     case "form":

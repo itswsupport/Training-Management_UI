@@ -22,6 +22,14 @@
  *                        wide?, lines? }], actions?: [{ label, tone? }] }
  *   { type: "screen",  caption?, chrome?, tiles?, panel?, kind? }
  *
+ * A `screen` block draws a grid by default. `kind` swaps that for a sheet the
+ * grid shapes cannot describe:
+ *   kind: "certificate" — the certificate page's printed sheet
+ *   kind: "player"      — the course page's video preview card, with
+ *                         { badge?, lecture?, note?, progress?, rows? } where
+ *                         each row is { name, state: "done"|"playing"|"todo",
+ *                         action? }
+ *
  * Each chapter carries an `audience`: "user", "officer" or "both". The manual's
  * toggle reads it, so a reader can look at the other role's chapters without
  * having that role.
@@ -336,6 +344,29 @@ export const CHAPTERS = [
                 text: 'the words "opened" appear in green beside the material once it is done, and the section header shows how many of its lectures are finished.',
               },
             ],
+          },
+          {
+            type: "screen",
+            kind: "player",
+            chrome: true,
+            badge: "62% watched · 90% needed",
+            lecture: "1.2 Personal Protective Equipment",
+            progress: "1/3 done",
+            rows: [
+              { name: "1.1 Why safety matters", state: "done" },
+              {
+                name: "1.2 Personal Protective Equipment",
+                state: "playing",
+                action: "Watch video",
+              },
+              {
+                name: "1.3 Safety data sheets (PDF)",
+                state: "todo",
+                action: "Open file",
+              },
+            ],
+            caption:
+              "The preview card plays the lecture you click, and the badge over it counts what has actually been watched. Below, under COURSE CONTENT, a finished lecture turns green and reads COMPLETED; the one in front of you offers WATCH VIDEO.",
           },
           {
             type: "notice",
@@ -743,6 +774,27 @@ export const CHAPTERS = [
               { label: "External Link", placeholder: "https://…" },
             ],
             actions: [{ label: "Save" }, { label: "Cancel", tone: "danger" }],
+          },
+          {
+            type: "screen",
+            kind: "player",
+            chrome: true,
+            note: "Preview — progress is not recorded",
+            lecture: "1.2 Personal Protective Equipment",
+            rows: [
+              {
+                name: "1.1 Why safety matters",
+                state: "todo",
+                action: "Watch video",
+              },
+              {
+                name: "1.2 Personal Protective Equipment",
+                state: "playing",
+                action: "Watch video",
+              },
+            ],
+            caption:
+              "The same card, opened as an officer. An uploaded lecture plays here so you can check what you have attached — but nothing you open is recorded, which is why the amber note stands where a learner sees their progress bar.",
           },
           {
             type: "notice",

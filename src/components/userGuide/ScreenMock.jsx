@@ -2,12 +2,15 @@
 
 import {
   ChevronLeft,
+  CircleCheckBig,
+  CirclePlay,
   Download,
   Eye,
   GraduationCap,
   Home,
   LogOut,
   Menu,
+  Play,
   User,
   UserCheck,
 } from "lucide-react";
@@ -141,6 +144,127 @@ function CertificateSheet() {
   );
 }
 
+/** One lecture in the COURSE CONTENT list, in whichever of its three states. */
+function LectureRow({ name, state, action }) {
+  const done = state === "done";
+  const playing = state === "playing";
+  return (
+    <div className="flex items-center gap-3 border-b border-gray-100 px-3 py-2 last:border-0">
+      {/* As on the course page, the icon doubles as the done tick rather than
+          the row carrying a status column of its own. */}
+      <span
+        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${
+          done
+            ? "bg-[#20c997]/15 text-[#158765]"
+            : playing
+              ? "bg-[#3482AE]/15 text-[#3482AE]"
+              : "bg-gray-100 text-gray-500"
+        }`}
+      >
+        {done ? (
+          <CircleCheckBig className="h-3.5 w-3.5" />
+        ) : (
+          <CirclePlay className="h-3.5 w-3.5" />
+        )}
+      </span>
+      <span className="min-w-0 flex-1 truncate text-[12px] font-semibold normal-case text-gray-700">
+        {name}
+      </span>
+      {done ? (
+        <span className="shrink-0 rounded-full bg-[#20c997]/15 px-2.5 py-1 text-[10px] font-bold tracking-wide text-[#158765] uppercase">
+          Completed
+        </span>
+      ) : action ? (
+        <span className="shrink-0 rounded bg-[#3482AE] px-3 py-1 text-[10px] font-bold tracking-wide text-white uppercase">
+          {action}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The course page's video preview card, and the lecture list under it.
+ *
+ * The one drawing the grid shapes cannot describe: a video is a picture, and
+ * what the manual has to show about it is where the watched counter sits and
+ * what a lecture looks like before and after it has been finished. Drawn like
+ * the rest of these — see the note at the top of the file.
+ */
+function PlayerMock({ badge, lecture, note, progress, rows }) {
+  const done = rows?.filter((row) => row.state === "done").length ?? 0;
+
+  return (
+    <div className="space-y-3">
+      {/* The 16:9 stage the player and its thumbnail share, so nothing on the
+          real page jumps when playback starts. */}
+      <div className="w-full sm:w-[55%]">
+        <div className="relative aspect-video w-full overflow-hidden rounded-t bg-[linear-gradient(135deg,#3482AE_0%,#1f4e6b_100%)]">
+          {badge ? (
+            <span className="absolute top-2 left-2 rounded bg-black/60 px-2 py-0.5 text-[10px] font-semibold normal-case text-white">
+              {badge}
+            </span>
+          ) : null}
+          <span className="absolute inset-0 flex items-center justify-center">
+            <span className="flex h-11 w-11 items-center justify-center rounded-full bg-white/95 shadow-lg">
+              <Play
+                className="h-5 w-5 translate-x-0.5 text-[#3482AE]"
+                fill="currentColor"
+              />
+            </span>
+          </span>
+          <span className="absolute inset-x-0 bottom-0 bg-[linear-gradient(0deg,rgba(0,0,0,0.75),transparent)] px-3 pt-6 pb-2 text-[11px] font-semibold normal-case text-white">
+            Preview this course
+          </span>
+        </div>
+        {lecture ? (
+          <p className="flex items-center gap-1.5 rounded-b border-x border-b border-gray-200 bg-[#fbfcfd] px-3 py-2 text-[11.5px] normal-case text-gray-700">
+            <CirclePlay className="h-3.5 w-3.5 shrink-0 text-[#3482AE]" />
+            <span className="truncate">{lecture}</span>
+          </p>
+        ) : null}
+      </div>
+
+      {rows?.length ? (
+        <div className="overflow-hidden rounded border border-gray-200 bg-white">
+          <div className="px-3 py-1.5" style={{ backgroundColor: BRAND }}>
+            <p className="text-[11px] font-bold tracking-wide text-white uppercase">
+              Course Content
+            </p>
+          </div>
+          {/* The toolbar. A learner is told how far through they are; an officer
+              is told that nothing they do here counts. */}
+          <div className="flex flex-wrap items-center gap-3 border-b border-gray-200 bg-[#fbfcfd] px-3 py-2">
+            <p className="text-[11px] normal-case text-gray-500">
+              1 section · {rows.length} lecture{rows.length === 1 ? "" : "s"}
+            </p>
+            {note ? (
+              <span className="rounded bg-[#ffc107]/20 px-2 py-0.5 text-[10px] font-bold tracking-wide text-[#a17200] uppercase">
+                {note}
+              </span>
+            ) : progress ? (
+              <span className="flex items-center gap-2">
+                <span className="h-1.5 w-20 overflow-hidden rounded-full bg-gray-200">
+                  <span
+                    className="block h-full rounded-full bg-[#20c997]"
+                    style={{ width: `${(done / rows.length) * 100}%` }}
+                  />
+                </span>
+                <span className="text-[11px] font-semibold normal-case text-gray-600">
+                  {progress}
+                </span>
+              </span>
+            ) : null}
+          </div>
+          {rows.map((row) => (
+            <LectureRow key={row.name} {...row} />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 /** The blue sidebar, exactly as `AppSidebar` builds it. */
 function Sidebar({ officer }) {
   const items = [
@@ -198,7 +322,13 @@ function Sidebar({ officer }) {
  * @param {string} [props.screenTitle] the page heading beside the BACK button
  * @param {Array} [props.tiles] the status tiles above the panel
  * @param {object} [props.panel] `{title, color, columns, rows}`
- * @param {"certificate"} [props.kind] a sheet instead of a grid
+ * @param {"certificate"|"player"} [props.kind] a sheet instead of a grid
+ * @param {string} [props.badge] the watched counter over the video
+ * @param {string} [props.lecture] which lecture the preview card is playing
+ * @param {string} [props.note] the amber strip an officer gets in place of the
+ *   learner's progress bar
+ * @param {string} [props.progress] that progress bar's label, e.g. "1/3 done"
+ * @param {Array} [props.rows] the COURSE CONTENT lectures under the player
  */
 export default function ScreenMock({
   caption,
@@ -209,6 +339,11 @@ export default function ScreenMock({
   tiles,
   panel,
   kind,
+  badge,
+  lecture,
+  note,
+  progress,
+  rows,
 }) {
   if (full) {
     return (
@@ -285,6 +420,15 @@ export default function ScreenMock({
       <div className="p-3">
         {tiles ? <Tiles items={tiles} /> : null}
         {kind === "certificate" ? <CertificateSheet /> : null}
+        {kind === "player" ? (
+          <PlayerMock
+            badge={badge}
+            lecture={lecture}
+            note={note}
+            progress={progress}
+            rows={rows}
+          />
+        ) : null}
         {panel ? <Panel {...panel} /> : null}
       </div>
 
