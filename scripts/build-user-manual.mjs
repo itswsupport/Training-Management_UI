@@ -714,6 +714,198 @@ function drawGrid(panel, x, ty, w, rowH) {
   });
 }
 
+/* How wide the video stage is against the panel it sits in — the preview card
+   is a narrow right-hand column on the real page, not the whole width of it.
+   The same fraction the on-screen mock uses. */
+const STAGE_FRAC = 0.55;
+/** The height of one lecture row in the COURSE CONTENT list below the stage. */
+const LECTURE_H = 8;
+
+/**
+ * How tall a `kind: "player"` block comes out.
+ *
+ * Kept apart from the drawing below because `drawScreen` has to size the panel
+ * behind it before a line of it is put down. The two must agree exactly — an
+ * under-measured player draws straight over the caption beneath it.
+ */
+function playerHeight(block, w) {
+  const stageH = (w * STAGE_FRAC * 9) / 16;
+  const strip = block.lecture ? 6 : 0;
+  const list = block.rows?.length
+    ? 3 + 6 + 7 + block.rows.length * LECTURE_H
+    : 0;
+  return stageH + strip + list;
+}
+
+/**
+ * The course page's video preview card and the lecture list under it — the
+ * printed twin of `PlayerMock`.
+ *
+ * @returns the height it occupied, which `playerHeight` must already have said.
+ */
+function drawPlayer(block, x, ty, w) {
+  const top = ty;
+  const stageW = w * STAGE_FRAC;
+  const stageH = (stageW * 9) / 16;
+
+  // The 16:9 stage. Flat rather than the card's gradient — jsPDF has no
+  // gradients, and the darker of the two ends reads closest in print.
+  doc.setFillColor("#1f4e6b");
+  doc.rect(x, ty, stageW, stageH, "F");
+
+  // The play button over it.
+  const cx = x + stageW / 2;
+  const cy = ty + stageH / 2;
+  doc.setFillColor("#ffffff");
+  doc.circle(cx, cy, 6, "F");
+  doc.setFillColor(C.brand);
+  doc.triangle(cx - 2, cy - 3.2, cx - 2, cy + 3.2, cx + 3.4, cy, "F");
+
+  // The watched counter, in the corner it actually sits in — the point of the
+  // whole drawing, since a learner has to know where to look for it.
+  if (block.badge) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(5.5);
+    const label = clean(block.badge);
+    const bw = doc.getTextWidth(label) + 3;
+    doc.setFillColor("#111827");
+    doc.roundedRect(x + 2, ty + 2, bw, 4.4, 0.8, 0.8, "F");
+    hex("#ffffff");
+    doc.text(label, x + 3.5, ty + 5.1);
+  }
+
+  doc.setFillColor("#111827");
+  doc.rect(x, ty + stageH - 5, stageW, 5, "F");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(5.5);
+  hex("#ffffff");
+  doc.text("Preview this course", x + 2.5, ty + stageH - 1.6);
+  ty += stageH;
+
+  // Which lecture the card is playing.
+  if (block.lecture) {
+    doc.setFillColor("#fbfcfd");
+    doc.setDrawColor("#e5e7eb");
+    doc.setLineWidth(0.2);
+    doc.rect(x, ty, stageW, 6, "FD");
+    doc.setFillColor(C.brand);
+    doc.circle(x + 3.5, ty + 3, 1.3, "F");
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(6);
+    hex("#374151");
+    doc.text(fit(block.lecture, stageW - 9), x + 6.5, ty + 4.1);
+    ty += 6;
+  }
+
+  if (!block.rows?.length) return ty - top;
+
+  ty += 3;
+  const listTop = ty;
+
+  doc.setFillColor(C.brand);
+  doc.rect(x, ty, w, 6, "F");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(6.5);
+  hex("#ffffff");
+  doc.text("COURSE CONTENT", x + 2.5, ty + 4.2);
+  ty += 6;
+
+  // The toolbar: how far through a learner is, or — for an officer — the note
+  // that says nothing here is being recorded.
+  doc.setFillColor("#fbfcfd");
+  doc.rect(x, ty, w, 7, "F");
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(6);
+  hex("#6b7280");
+  const count = `1 section  ·  ${block.rows.length} lecture${
+    block.rows.length === 1 ? "" : "s"
+  }`;
+  doc.text(clean(count), x + 2.5, ty + 4.6);
+  const after = x + 2.5 + doc.getTextWidth(clean(count)) + 4;
+
+  if (block.note) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(5.5);
+    const label = clean(block.note.toUpperCase());
+    doc.setFillColor("#fff3cd");
+    doc.roundedRect(after, ty + 1.5, doc.getTextWidth(label) + 4, 4.2, 0.8, 0.8, "F");
+    hex("#a17200");
+    doc.text(label, after + 2, ty + 4.5);
+  } else if (block.progress) {
+    const done = block.rows.filter((row) => row.state === "done").length;
+    const barW = 18;
+    doc.setFillColor("#e5e7eb");
+    doc.roundedRect(after, ty + 2.8, barW, 1.4, 0.7, 0.7, "F");
+    if (done > 0) {
+      doc.setFillColor(C.approved);
+      doc.roundedRect(after, ty + 2.8, (barW * done) / block.rows.length, 1.4, 0.7, 0.7, "F");
+    }
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(6);
+    hex("#4b5563");
+    doc.text(clean(block.progress), after + barW + 2.5, ty + 4.6);
+  }
+  ty += 7;
+
+  block.rows.forEach((row, i) => {
+    doc.setFillColor("#ffffff");
+    doc.rect(x, ty, w, LECTURE_H, "F");
+    if (i) {
+      doc.setDrawColor("#f3f4f6");
+      doc.setLineWidth(0.2);
+      doc.line(x, ty, x + w, ty);
+    }
+
+    const done = row.state === "done";
+    const mid = ty + LECTURE_H / 2;
+    doc.setFillColor(
+      done ? "#e8f8f2" : row.state === "playing" ? "#e6f0f6" : "#f3f4f6"
+    );
+    doc.circle(x + 5, mid, 2.6, "F");
+    if (done) {
+      // A tick, drawn as two strokes — there is no glyph for one in WinAnsi.
+      doc.setDrawColor("#158765");
+      doc.setLineWidth(0.45);
+      doc.line(x + 3.8, mid - 0.1, x + 4.6, mid + 0.9);
+      doc.line(x + 4.6, mid + 0.9, x + 6.2, mid - 1.2);
+      doc.setLineWidth(0.2);
+    } else {
+      doc.setFillColor(row.state === "playing" ? C.brand : "#9ca3af");
+      doc.triangle(x + 4.2, mid - 1.4, x + 4.2, mid + 1.4, x + 6.4, mid, "F");
+    }
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(6.5);
+    hex("#374151");
+    doc.text(fit(row.name, w - 42), x + 9.5, mid + 1.2);
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(5.5);
+    if (done) {
+      const label = "COMPLETED";
+      const pw = doc.getTextWidth(label) + 5;
+      doc.setFillColor("#e8f8f2");
+      doc.roundedRect(x + w - pw - 2.5, mid - 2.1, pw, 4.2, 2, 2, "F");
+      hex("#158765");
+      doc.text(label, x + w - pw / 2 - 2.5, mid + 0.9, { align: "center" });
+    } else if (row.action) {
+      const label = clean(row.action.toUpperCase());
+      const pw = doc.getTextWidth(label) + 5;
+      doc.setFillColor(C.brand);
+      doc.roundedRect(x + w - pw - 2.5, mid - 2.1, pw, 4.2, 0.8, 0.8, "F");
+      hex("#ffffff");
+      doc.text(label, x + w - pw / 2 - 2.5, mid + 0.9, { align: "center" });
+    }
+    ty += LECTURE_H;
+  });
+
+  doc.setDrawColor("#e5e7eb");
+  doc.setLineWidth(0.2);
+  doc.rect(x, listTop, w, ty - listTop, "S");
+
+  return ty - top;
+}
+
 function drawScreen(block) {
   if (block.full) return drawFullScreen(block);
 
@@ -725,7 +917,9 @@ function drawScreen(block) {
     ? 7 + rowH * (block.panel.rows.length + 1)
     : block.kind === "certificate"
       ? 52
-      : 0;
+      : block.kind === "player"
+        ? playerHeight(block, BODY_W - pad * 2) + 4
+        : 0;
   const capH = block.caption ? measure(block.caption, BODY_W - 8, 8.5) + 4 : 0;
   const panelH = headH + pad * 2 + tilesH + bodyH + capH;
   need(panelH + 5);
@@ -808,6 +1002,11 @@ function drawScreen(block) {
     doc.text("Introduction to Workplace Safety", mid, ty + 44, {
       align: "center",
     });
+    ty += bodyH;
+  }
+
+  if (block.kind === "player") {
+    drawPlayer(block, MARGIN + pad, ty, innerW);
     ty += bodyH;
   }
 
