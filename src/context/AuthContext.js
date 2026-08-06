@@ -4,6 +4,7 @@ import React, { createContext, useContext, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import * as AuthService from "@/services/AuthService";
+import { PORTAL_DASHBOARD_URL } from "@/config/portal";
 import { getDefaultDashboardForUser, getUserRole } from "@/lib/permissions";
 import {
   clearSession,
@@ -107,8 +108,13 @@ export function AuthProvider({ children }) {
     // bean whose username login never sets, so it always reports "already
     // logged out". Clearing local state is what actually ends the session.
     clearSession();
-    setUser(null);
-    router.push("/Login");
+
+    // Back to the portal the user came in from, as a hard navigation — it is
+    // another origin, so router.push cannot reach it, and the page load is what
+    // clears React state. `user` is deliberately left standing until then:
+    // dropping it here would let ProtectedLayout flash the login form during
+    // the moment before the browser leaves.
+    window.location.href = PORTAL_DASHBOARD_URL;
   };
 
   const forgetPassword = (empCode) => AuthService.forgetPassword(empCode);

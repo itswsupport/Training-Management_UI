@@ -20,6 +20,7 @@ The app is served under the `/etms` base path (payroll uses `/payroll`).
 | `NEXT_PUBLIC_API_BASE_URL` | What the browser calls | `/etms/api` |
 | `ETMS_BACKEND_ORIGIN` | Where `/api/*` is rewritten to | `http://localhost:8096/trainingmodule` |
 | `ETMS_TOKEN_SECRET_KEY` | AES-128 key for portal hand-off tokens, exactly 16 bytes. Server-only — never send it to the browser | `REPL_EOB_2024_SK` |
+| `NEXT_PUBLIC_PORTAL_DASHBOARD_URL` | Where logout hands the user back to | `https://replportal.co.in:8443/portal/dashboard.jsp` |
 
 The default keeps every request same-origin: the browser hits `/etms/api/...`,
 and `next.config.mjs` rewrites it to the Spring backend, so there is no CORS
@@ -44,6 +45,11 @@ against the server clock.
 The `/Login` password form is untouched and still works for anyone reaching the
 app directly. Changing `ETMS_TOKEN_SECRET_KEY` requires the same change in the
 portal's `encryptEmpCode()`, or every hand-off stops decrypting.
+
+**Logging out** goes back the way the user came in: `LOGOUT` clears the session
+and hard-navigates to `NEXT_PUBLIC_PORTAL_DASHBOARD_URL` (the portal dashboard),
+since the app the user is leaving is not the one that signed them in. A session
+that simply times out still lands on `/Login`.
 
 ## Structure
 
