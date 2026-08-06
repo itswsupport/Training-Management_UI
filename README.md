@@ -19,10 +19,31 @@ The app is served under the `/etms` base path (payroll uses `/payroll`).
 | --- | --- | --- |
 | `NEXT_PUBLIC_API_BASE_URL` | What the browser calls | `/etms/api` |
 | `ETMS_BACKEND_ORIGIN` | Where `/api/*` is rewritten to | `http://localhost:8096/trainingmodule` |
+| `ETMS_TOKEN_SECRET_KEY` | AES-128 key for portal hand-off tokens, exactly 16 bytes. Server-only — never send it to the browser | `REPL_EOB_2024_SK` |
 
 The default keeps every request same-origin: the browser hits `/etms/api/...`,
 and `next.config.mjs` rewrites it to the Spring backend, so there is no CORS
 setup in development and an nginx reverse proxy handles it in production.
+
+## Signing in from the portal
+
+The REPL portal launches this app at `https://replportal.co.in/etms/<token>`,
+where `<token>` is the portal's `encryptEmpCode()` output:
+
+```
+base64url( AES-128-CBC( "empCode|timestampMillis" ) ), IV = the key bytes
+```
+
+`src/app/[token]/page.js` receives it, `src/app/auth/decrypt-token/route.js`
+decrypts it **on the server** (the key stays out of the client bundle, and
+`crypto.subtle` does not exist on the plain-HTTP origin production is served
+from), and the employee code that falls out is signed in through
+`AuthService.loginWithEmpCode`. Tokens are refused after 10 minutes, measured
+against the server clock.
+
+The `/Login` password form is untouched and still works for anyone reaching the
+app directly. Changing `ETMS_TOKEN_SECRET_KEY` requires the same change in the
+portal's `encryptEmpCode()`, or every hand-off stops decrypting.
 
 ## Structure
 

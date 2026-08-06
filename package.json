@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "manual": "node scripts/build-user-manual.mjs"
+    "manual": "node scripts/build-user-manual.mjs",
+    "token": "node scripts/mint-portal-token.mjs"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",

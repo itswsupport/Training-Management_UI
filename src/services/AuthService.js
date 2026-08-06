@@ -27,6 +27,32 @@ export async function login(empCode, password) {
   if (!code || !password) {
     throw new Error("Employee code and password are required.");
   }
+  return signIn(code, password);
+}
+
+/**
+ * Signs in an employee code that a portal token already vouched for.
+ *
+ * The portal has authenticated the user; the token proves it. There is no
+ * password to forward, and `emp_pass` is a required @RequestParam, so a
+ * placeholder is sent — which changes nothing, because the backend compares no
+ * passwords at all (see the note above). If it ever starts to, this needs a
+ * real token endpoint on the backend rather than a different placeholder.
+ *
+ * @param {string} empCode decrypted out of the portal token
+ * @returns {Promise<object>} the sanitised user
+ */
+export async function loginWithEmpCode(empCode) {
+  const code = String(empCode ?? "").trim();
+
+  if (!code) {
+    throw new Error("The portal token carried no employee code.");
+  }
+  return signIn(code, "portal-token");
+}
+
+/** The shared /login call. `code` is validated here for both callers. */
+async function signIn(code, password) {
   // The backend binds emp_code to a Java `long`; a non-numeric value fails type
   // conversion and never reaches the controller.
   if (!/^\d{1,18}$/.test(code)) {
