@@ -88,6 +88,42 @@ export function isTrainingOfficer(user) {
 export const PUBLIC_ROUTES = ["/Login", "/reset-password"];
 
 /**
+ * Every first path segment the app itself owns.
+ *
+ * The portal hands off at `/<token>`, which is a single-segment dynamic route
+ * and therefore indistinguishable from a route name by shape alone — the token
+ * alphabet also spells "TrainingOfficerDashboard". Listing the app's own
+ * segments is what keeps a real page from being mistaken for a token and
+ * silently treated as public. Add to this whenever a top-level route is added.
+ */
+const APP_ROOT_SEGMENTS = new Set([
+  "Login",
+  "reset-password",
+  "TrainingOfficerDashboard",
+  "UserDashboard",
+  "certificate",
+  "course",
+  "user-guide",
+  "auth",
+]);
+
+/**
+ * The portal's token is base64url of at least one AES block, so 22+ characters
+ * from that alphabet.
+ */
+const PORTAL_TOKEN = /^[A-Za-z0-9_-]{22,}$/;
+
+/** Whether `pathname` is the portal hand-off route, `/<token>`. */
+export function isTokenLoginRoute(pathname) {
+  const segments = String(pathname ?? "")
+    .split("/")
+    .filter(Boolean);
+  if (segments.length !== 1) return false;
+  if (APP_ROOT_SEGMENTS.has(segments[0])) return false;
+  return PORTAL_TOKEN.test(segments[0]);
+}
+
+/**
  * Pages that render on their own, with no sidebar and no header bar.
  *
  * The user manual opens in its own tab and is a document rather than a screen
@@ -98,6 +134,9 @@ export const PUBLIC_ROUTES = ["/Login", "/reset-password"];
 export const CHROMELESS_ROUTES = ["/user-guide"];
 
 export function isChromelessRoute(pathname) {
+  // The hand-off page is a spinner on its way somewhere else; a sidebar and a
+  // logout button around it would only offer a way out of a redirect.
+  if (isTokenLoginRoute(pathname)) return true;
   return CHROMELESS_ROUTES.some(
     (route) => pathname === route || pathname.startsWith(`${route}/`)
   );
@@ -112,7 +151,9 @@ const ROUTE_ROLES = {
 };
 
 export function isPublicRoute(pathname) {
-  return PUBLIC_ROUTES.includes(pathname);
+  // The hand-off page has to render without a session — proving who the visitor
+  // is is the whole job it does.
+  return PUBLIC_ROUTES.includes(pathname) || isTokenLoginRoute(pathname);
 }
 
 /**

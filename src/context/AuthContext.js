@@ -82,6 +82,26 @@ export function AuthProvider({ children }) {
     }
   };
 
+  /**
+   * Signs in from a portal hand-off token's employee code.
+   *
+   * Any session already in storage is replaced, not merged: the portal may have
+   * been switched to a different employee since this browser last signed in,
+   * and the token is the newer statement of who is here.
+   */
+  const loginWithEmpCode = async (empCode) => {
+    try {
+      const signedIn = await AuthService.loginWithEmpCode(empCode);
+      startSession(signedIn);
+      setUser(signedIn);
+      return signedIn;
+    } catch (err) {
+      clearSession();
+      setUser(null);
+      throw err;
+    }
+  };
+
   const logout = () => {
     // The backend's GET /logout is a no-op: it inspects a singleton LoginUser
     // bean whose username login never sets, so it always reports "already
@@ -99,6 +119,7 @@ export function AuthProvider({ children }) {
         user,
         loading,
         login,
+        loginWithEmpCode,
         logout,
         forgetPassword,
         homePath: getDefaultDashboardForUser(user),
