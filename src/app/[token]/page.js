@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 
 import { useAuth } from "@/context/AuthContext";
@@ -37,11 +37,6 @@ export default function TokenLoginPage() {
 
   const [error, setError] = useState(null);
 
-  // Read through a ref so a new function identity from AuthProvider cannot
-  // re-trigger the effect mid-exchange.
-  const loginRef = useRef(loginWithEmpCode);
-  loginRef.current = loginWithEmpCode;
-
   const token = typeof params?.token === "string" ? params.token : "";
 
   useEffect(() => {
@@ -59,7 +54,7 @@ export default function TokenLoginPage() {
     (async () => {
       try {
         const empCode = await decryptPortalToken(token);
-        const signedIn = await loginRef.current(empCode);
+        const signedIn = await loginWithEmpCode(empCode);
 
         // A hard navigation, matching the login form: the session lives in
         // localStorage, and a full load guarantees AuthProvider re-reads it
@@ -72,7 +67,11 @@ export default function TokenLoginPage() {
         setError(err?.message || "Sign-in from the portal failed.");
       }
     })();
-  }, [token, user, loading, error, router]);
+    // AuthProvider hands out a new `loginWithEmpCode` on every render, so this
+    // effect re-runs freely. That is harmless: `processedTokens` above turns
+    // every run after the first into a no-op, and the redirect branch is
+    // idempotent.
+  }, [token, user, loading, error, router, loginWithEmpCode]);
 
   if (error) {
     return (
