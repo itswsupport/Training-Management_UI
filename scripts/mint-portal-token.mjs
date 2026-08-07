@@ -11,7 +11,7 @@
  *   node scripts/mint-portal-token.mjs 10234 --age 11   # 11 minutes old, to
  *                                                       # see the expiry path
  *
- * The key must match the server's: set ETMS_TOKEN_SECRET_KEY in both places, or
+ * The key must match the server's: set PORTAL_TOKEN_SECRET in both places, or
  * leave it unset in both and the shared fallback is used.
  */
 
@@ -25,9 +25,9 @@ const empCode = args.find((a) => !a.startsWith("--")) ?? "10234";
 const ageIndex = args.indexOf("--age");
 const ageMinutes = ageIndex === -1 ? 0 : Number(args[ageIndex + 1] ?? 0);
 
-const secret = process.env.ETMS_TOKEN_SECRET_KEY || FALLBACK_SECRET;
+const secret = process.env.PORTAL_TOKEN_SECRET || FALLBACK_SECRET;
 if (Buffer.byteLength(secret, "utf8") !== 16) {
-  console.error("ETMS_TOKEN_SECRET_KEY must be exactly 16 bytes for AES-128.");
+  console.error("PORTAL_TOKEN_SECRET must be exactly 16 bytes for AES-128.");
   process.exit(1);
 }
 

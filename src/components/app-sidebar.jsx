@@ -88,15 +88,21 @@ export function AppSidebar() {
         <nav className="px-4 py-2 text-xl text-white border-white border-opacity-80">
           <SidebarGroup>
             <ul className="space-y-0">
-              {/* HOME — the group portal the ETMS sits inside. */}
+              {/* HOME — the group portal the ETMS sits inside. Leaving for it
+                  ends the session, exactly as LOGOUT does: this is the way out
+                  of the app, and a session left behind on a shop-floor machine
+                  is the thing the deadline exists to prevent. It was a plain
+                  link with the portal URL written into it, which walked away
+                  from the app leaving the session standing. */}
               <li>
-                <a
-                  href="https://replportal.co.in:8443/portal/dashboard.jsp"
-                  className="flex items-center space-x-4 px-4 py-3 rounded-none hover:bg-[#2a6a8f] font-semibold text-lg"
+                <button
+                  type="button"
+                  onClick={logout}
+                  className="flex items-center space-x-4 px-4 py-3 rounded-none hover:bg-[#2a6a8f] font-semibold text-lg w-full text-left"
                 >
                   <Home className="w-7 h-7" />
                   <span>HOME</span>
-                </a>
+                </button>
               </li>
 
               {dashboards.map((key) => {

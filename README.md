@@ -19,7 +19,6 @@ The app is served under the `/etms` base path (payroll uses `/payroll`).
 | --- | --- | --- |
 | `NEXT_PUBLIC_API_BASE_URL` | What the browser calls | `/etms/api` |
 | `ETMS_BACKEND_ORIGIN` | Where `/api/*` is rewritten to | `http://localhost:8096/trainingmodule` |
-| `ETMS_TOKEN_SECRET_KEY` | AES-128 key for portal hand-off tokens, exactly 16 bytes. Server-only — never send it to the browser | `REPL_EOB_2024_SK` |
 | `NEXT_PUBLIC_PORTAL_DASHBOARD_URL` | Where logout hands the user back to | `https://replportal.co.in:8443/portal/dashboard.jsp` |
 
 The default keeps every request same-origin: the browser hits `/etms/api/...`,
@@ -35,16 +34,27 @@ where `<token>` is the portal's `encryptEmpCode()` output:
 base64url( AES-128-CBC( "empCode|timestampMillis" ) ), IV = the key bytes
 ```
 
-`src/app/[token]/page.js` receives it, `src/app/auth/decrypt-token/route.js`
-decrypts it **on the server** (the key stays out of the client bundle, and
-`crypto.subtle` does not exist on the plain-HTTP origin production is served
-from), and the employee code that falls out is signed in through
-`AuthService.loginWithEmpCode`. Tokens are refused after 10 minutes, measured
-against the server clock.
+`src/app/[token]/page.js` receives it and hands it to the backend untouched
+(`GET /login/token`). **The backend owns the key** — `PortalTokenService`
+decrypts the token, checks its ten-minute window against the server clock, and
+answers with the same `LoginUser` a password login returns. Nothing in the
+browser knows the key, because a key in the bundle is a key anyone can mint
+tokens with.
 
-The `/Login` password form is untouched and still works for anyone reaching the
-app directly. Changing `ETMS_TOKEN_SECRET_KEY` requires the same change in the
-portal's `encryptEmpCode()`, or every hand-off stops decrypting.
+The key is `portal.token.secret` in the backend's `application.properties`, and
+it must match the portal's `encryptEmpCode()`. Changing one without the other
+stops every hand-off. `npm run token -- <emp_code>` mints a token locally for
+testing; pass the same key through `PORTAL_TOKEN_SECRET` if you have changed it.
+
+**The portal is the only way in.** `/Login` no longer signs anyone in: every
+arrival on it — a session that ran out and was refreshed, the guard redirecting
+a visitor who has none, someone typing the URL — runs the same code as LOGOUT
+and returns to the portal. So do HOME and the first click after a session
+deadline passes; all four are the one `leaveForPortal()` in `AuthContext`.
+
+`Loginform.jsx` is kept, unused, for the day password sign-in is wanted back.
+Note the consequence for `NEXT_PUBLIC_PORTAL_DASHBOARD_URL`: it must point at
+the portal and never back into this app, or leaving becomes a redirect loop.
 
 **Logging out** goes back the way the user came in: `LOGOUT` clears the session
 and hard-navigates to `NEXT_PUBLIC_PORTAL_DASHBOARD_URL` (the portal dashboard),
@@ -99,10 +109,18 @@ crashing a dashboard.
 
 ## Known constraints inherited from the backend
 
-- `/login` **does not verify the password** — the controller discards its own
-  comparison, so any password is accepted for an existing employee code.
-- `/login` returns the stored bcrypt hash in its payload (the field has no
-  `@JsonIgnore`). `AuthService.login` strips it before anything is persisted.
+- **No endpoint requires authentication.** `SpringSecurityConfig` never calls
+  `anyRequest().authenticated()` and there is no filter, so `/etms/api/*` answers
+  anyone who asks — a signed-in session is a UI convention, not a backend rule.
+  `permissions.js` guards the browser only; the officer's write endpoints are
+  open. Closing this needs the backend to issue `LoginUser.token` (declared,
+  never set) — `config/api.js` already sends it as a Bearer header the day it
+  appears.
+- `/login` verifies the password with BCrypt against the **EMS employee master**
+  (`db_ems.emp_details_mst`), not ETMS's own copy of the row, because that is
+  where the portal writes a changed password. It used to accept any password for
+  an existing employee code; `AuthService` still strips the hash from the payload
+  in case it meets an un-upgraded backend.
 - `/quiz/list` serialises the raw entity, so the assignment answer key
   (`quaAnswer`) is on the wire. `AssignmentService` drops it from the mapped
   result, but hiding it properly needs a backend projection.

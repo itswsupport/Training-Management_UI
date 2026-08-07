@@ -4,16 +4,16 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 
 import { useAuth } from "@/context/AuthContext";
-import { decryptPortalToken } from "@/lib/token";
 import { getDefaultDashboardForUser, isTokenLoginRoute } from "@/lib/permissions";
 
 /**
  * Portal hand-off: `https://replportal.co.in/etms/<token>`.
  *
  * The portal's dashboard encrypts the employee code it already has and sends
- * the browser here. This page turns that token back into a session and gets out
- * of the way. The password form at /Login stays for anyone reaching the app
- * directly.
+ * the browser here. The token goes to the backend as-is — it holds the AES key
+ * and decides whether the token is good (PortalTokenService) — and what comes
+ * back is a session. The password form at /Login stays for anyone reaching the
+ * app directly.
  *
  * This is the app's catch-all single-segment route, so a mistyped URL — /login
  * rather than /Login, matching being case-sensitive — lands here too. Those are
@@ -31,7 +31,7 @@ const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || "/etms";
 const processedTokens = new Set();
 
 export default function TokenLoginPage() {
-  const { user, loading, loginWithEmpCode } = useAuth();
+  const { user, loading, loginWithPortalToken } = useAuth();
   const router = useRouter();
   const params = useParams();
 
@@ -53,8 +53,7 @@ export default function TokenLoginPage() {
 
     (async () => {
       try {
-        const empCode = await decryptPortalToken(token);
-        const signedIn = await loginWithEmpCode(empCode);
+        const signedIn = await loginWithPortalToken(token);
 
         // A hard navigation, matching the login form: the session lives in
         // localStorage, and a full load guarantees AuthProvider re-reads it
@@ -67,11 +66,11 @@ export default function TokenLoginPage() {
         setError(err?.message || "Sign-in from the portal failed.");
       }
     })();
-    // AuthProvider hands out a new `loginWithEmpCode` on every render, so this
-    // effect re-runs freely. That is harmless: `processedTokens` above turns
-    // every run after the first into a no-op, and the redirect branch is
+    // AuthProvider hands out a new `loginWithPortalToken` on every render, so
+    // this effect re-runs freely. That is harmless: `processedTokens` above
+    // turns every run after the first into a no-op, and the redirect branch is
     // idempotent.
-  }, [token, user, loading, error, router, loginWithEmpCode]);
+  }, [token, user, loading, error, router, loginWithPortalToken]);
 
   if (error) {
     return (
