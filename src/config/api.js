@@ -27,6 +27,8 @@ export const ApiStatus = {
   DATA_NOT_FOUND: 204,
   UNAUTHORIZED: 401,
   SERVER_ERROR: 501,
+  /** A portal hand-off token that was expired, forged, or unreadable. */
+  INVALID_TOKEN: 1011,
 };
 
 /**

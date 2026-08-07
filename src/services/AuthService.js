@@ -11,11 +11,10 @@ import { getUserRole } from "@/lib/permissions";
 /**
  * Signs in and returns the LoginUser the backend serialises.
  *
- * SECURITY NOTE: the backend discards its own password comparison
- * (LoginController.java) — any password is accepted for an existing employee
- * code — and it serialises the stored password hash back in the payload,
- * because the field carries no @JsonIgnore. The hash is stripped here so it is
- * never held in state or written to localStorage.
+ * The backend compares the password with BCrypt against the EMS employee master
+ * (db_ems), the copy the portal keeps current — so a wrong password now comes
+ * back as UNAUTHORIZED. It used to accept any password at all for an existing
+ * employee code.
  *
  * @param {string} empCode
  * @param {string} password
@@ -31,24 +30,42 @@ export async function login(empCode, password) {
 }
 
 /**
- * Signs in an employee code that a portal token already vouched for.
+ * Signs in with the hand-off token the portal mints.
  *
- * The portal has authenticated the user; the token proves it. There is no
- * password to forward, and `emp_pass` is a required @RequestParam, so a
- * placeholder is sent — which changes nothing, because the backend compares no
- * passwords at all (see the note above). If it ever starts to, this needs a
- * real token endpoint on the backend rather than a different placeholder.
+ * The token goes to the backend untouched: it holds the AES key, decrypts the
+ * employee code out of the token and checks its ten-minute window
+ * (PortalTokenService). Nothing about the key is known here, which is the point
+ * — a key in the browser bundle is a key anyone can mint tokens with.
  *
- * @param {string} empCode decrypted out of the portal token
+ * @param {string} token base64url token from the /etms/<token> URL
  * @returns {Promise<object>} the sanitised user
  */
-export async function loginWithEmpCode(empCode) {
-  const code = String(empCode ?? "").trim();
-
-  if (!code) {
-    throw new Error("The portal token carried no employee code.");
+export async function loginWithPortalToken(token) {
+  if (!token) {
+    throw new Error("No portal token supplied.");
   }
-  return signIn(code, "portal-token");
+
+  let body;
+  try {
+    const res = await api.get("/login/token", { params: { token } });
+    body = res.data;
+  } catch (err) {
+    throw new Error(apiErrorMessage(err, "Training service is unavailable."));
+  }
+
+  if (body?.status_code === ApiStatus.INVALID_TOKEN) {
+    throw new Error(
+      "This sign-in link is no longer valid. Please open Training Management again from the portal."
+    );
+  }
+  if (body?.status_code === ApiStatus.UNAUTHORIZED || !body?.response) {
+    throw new Error("No active employee matches this sign-in link.");
+  }
+  if (body.status_code !== ApiStatus.SUCCESS) {
+    throw new Error(body.message || "Unable to sign in.");
+  }
+
+  return toSessionUser(body.response, String(body.response.username ?? "").trim());
 }
 
 /** The shared /login call. `code` is validated here for both callers. */
@@ -76,8 +93,20 @@ async function signIn(code, password) {
     throw new Error(body.message || "Unable to sign in.");
   }
 
-  // Drop the password hash the backend echoes back.
-  const { password: _hash, ...user } = body.response;
+  return toSessionUser(body.response, code);
+}
+
+/**
+ * Turns a LoginUser payload into the record the session holds.
+ *
+ * @param {object} response the backend's `response` object
+ * @param {string} code the employee code this sign-in was for
+ */
+function toSessionUser(response, code) {
+  // Older backends echoed the stored password hash back (the field had no
+  // @JsonIgnore). It is dropped here as well as there, so an un-upgraded
+  // backend cannot put a hash into localStorage.
+  const { password: _hash, ...user } = response;
 
   // UserServiceImpl grants no authority at all to a user who has roles but is
   // neither a TRAINING OFFICER nor a level-1 reporting authority. The legacy

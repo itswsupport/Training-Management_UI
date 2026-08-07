@@ -104,7 +104,6 @@ const APP_ROOT_SEGMENTS = new Set([
   "certificate",
   "course",
   "user-guide",
-  "auth",
 ]);
 
 /**
