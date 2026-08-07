@@ -11,6 +11,7 @@ import { AppSidebar } from "@/components/app-sidebar";
 import ScrollFooter from "@/components/ScrollFooter";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { useAuth } from "@/context/AuthContext";
+import { useCourseLinkGrants } from "@/hooks/useCourseLinkGrants";
 import {
   canAccessRoute,
   getAllUserRoles,
@@ -24,6 +25,11 @@ export default function ProtectedLayout({ children }) {
   const router = useRouter();
   const pathname = usePathname() ?? "";
   const [isRedirecting, setIsRedirecting] = useState(false);
+
+  // Course links anywhere in the app record that the user reached the course by
+  // following the app's own navigation, which is what tells a real visit apart
+  // from a hand-edited URL.
+  useCourseLinkGrants();
 
   const isAuthPage = isPublicRoute(pathname);
 

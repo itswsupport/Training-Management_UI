@@ -50,6 +50,55 @@ export async function getUserCourses(empCode, status) {
 }
 
 /**
+ * Which of the learner's own lists this course sits in, or null if none.
+ *
+ * The course routes take the module id from the URL, and nothing about
+ * `/emodule` binds a module to an employee — it will happily return any course
+ * to anyone who asks for it. Without this check a learner who edits the id in
+ * the address bar reads a course that was never assigned to them. Obfuscating
+ * the id in the URL does not help: it only makes the ids harder to guess, and a
+ * guess that lands still opens the course.
+ *
+ * The status matters beyond yes/no: an overdue course is still the learner's to
+ * read, but its quarter has lapsed, so nothing may be submitted against it.
+ *
+ * A learner's course sits in exactly one status, so all four are asked at once
+ * and the first hit wins.
+ *
+ * @param {string} empCode
+ * @param {number|string} moduleId
+ * @returns {Promise<number|null>} one of COURSE_STATUS, or null if not theirs
+ */
+export async function getAssignedStatus(empCode, moduleId) {
+  if (!empCode || !Number.isFinite(Number(moduleId))) return null;
+
+  const statuses = Object.values(COURSE_STATUS);
+  const lists = await Promise.all(
+    statuses.map((status) =>
+      // One unreachable status must not deny a course the others would allow.
+      getUserCourses(empCode, status).catch(() => [])
+    )
+  );
+
+  const hit = lists.findIndex((list) =>
+    list.some((c) => String(c.id) === String(moduleId))
+  );
+  return hit === -1 ? null : statuses[hit];
+}
+
+/**
+ * Is this course one of the learner's own? Overdue counts — the course is still
+ * theirs to open, it just cannot be submitted against.
+ *
+ * @param {string} empCode
+ * @param {number|string} moduleId
+ * @returns {Promise<boolean>}
+ */
+export async function isCourseAssigned(empCode, moduleId) {
+  return (await getAssignedStatus(empCode, moduleId)) !== null;
+}
+
+/**
  * The learner's record for one completed course — the authoritative source for
  * a certificate's name / course / date / grade.
  *

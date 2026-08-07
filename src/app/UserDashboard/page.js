@@ -131,14 +131,11 @@ export default function UserDashboard() {
             headerColor={active.accent}
           />
         ) : (
-          // Overdue is view-only: the quarter lapsed, so the course can be seen
-          // but not opened, started, or acted on.
           <ModulesGrid
             data={data}
             loading={loading}
             error={error}
             onRetry={fetchCourses}
-            readOnly={active.id === "overdue"}
             title={active.header}
             headerColor={active.accent}
             emptyMessage={`No ${active.label.toLowerCase()} courses found`}

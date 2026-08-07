@@ -7,6 +7,9 @@ import AssignmentForm from "@/components/course/AssignmentForm";
 import CourseNotice, { CourseLoading } from "@/components/course/CourseNotice";
 import { apiErrorMessage } from "@/config/api";
 import { useAuth } from "@/context/AuthContext";
+import { useCourseAccess } from "@/hooks/useCourseAccess";
+import { decodeId, encodeId } from "@/lib/courseId";
+import { grantCourseAccess } from "@/lib/courseGrant";
 import { getEmpCode, isTrainingOfficer } from "@/lib/permissions";
 import {
   getAssignmentQuestions,
@@ -39,12 +42,15 @@ function groupByLecture(lectures, questions) {
 
 export default function AssignmentPage({ params }) {
   const { id, sectionId: rawSectionId } = use(params);
-  const emoduleId = Number(id);
-  const sectionId = Number(rawSectionId);
+  const emoduleId = decodeId(id);
+  const sectionId = decodeId(rawSectionId);
 
   const router = useRouter();
   const { user } = useAuth();
   const empCode = getEmpCode(user);
+
+  // Guards the ids in the URL, which are otherwise anybody's to change.
+  const access = useCourseAccess(emoduleId);
 
   // The assignment is the employee's to sit. A training officer opens it to
   // check the paper, so they get the questions with no way to answer or submit.
@@ -67,10 +73,24 @@ export default function AssignmentPage({ params }) {
   const nothingToSit = state.status === "empty";
 
   useEffect(() => {
-    if (nothingToSit) router.replace(`/course/${emoduleId}`);
+    if (!nothingToSit) return;
+    // Sending them back to the course counts as the app's own navigation.
+    grantCourseAccess(emoduleId);
+    router.replace(`/course/${encodeId(emoduleId)}`);
   }, [nothingToSit, emoduleId, router]);
 
   useEffect(() => {
+    if (!Number.isFinite(emoduleId) || !Number.isFinite(sectionId)) {
+      setState({
+        status: "error",
+        message: "This assignment could not be opened.",
+      });
+      return undefined;
+    }
+    // Nothing is fetched until the course is known to be this user's. A refused
+    // course stays on "loading" — the hook is already sending it away, and a
+    // message here would only announce what it declined to say.
+    if (!access.allowed) return undefined;
     if (!empCode) return undefined;
     let cancelled = false;
 
@@ -110,7 +130,7 @@ export default function AssignmentPage({ params }) {
 
           // Course content links here per lecture. Answers are saved question
           // by question either way; only the questions shown are narrowed.
-          const lectureId = Number(
+          const lectureId = decodeId(
             new URLSearchParams(window.location.search).get("lectureId")
           );
           const byLecture = groupByLecture(section.lectures ?? [], questions);
@@ -153,7 +173,7 @@ export default function AssignmentPage({ params }) {
     return () => {
       cancelled = true;
     };
-  }, [emoduleId, sectionId, empCode]);
+  }, [emoduleId, sectionId, empCode, access.allowed]);
 
   // The spinner covers the redirect too — a blank frame for the moment the
   // route takes to change reads as a page that failed to load.
@@ -181,6 +201,7 @@ export default function AssignmentPage({ params }) {
       lectureName={state.lectureName}
       readOnly={readOnly}
       submitted={state.submitted}
+      overdue={access.overdue}
       initialAnswers={state.answered}
     />
   );

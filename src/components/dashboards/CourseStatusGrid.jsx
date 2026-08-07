@@ -9,6 +9,7 @@ import autoTable from "jspdf-autotable";
 
 import ExoMaterialTable from "@/components/ui/common/ExoMaterialTable";
 import ExportActions from "@/components/ui/common/ExportActions";
+import { encodeId } from "@/lib/courseId";
 import { getCourseStatusConfig } from "@/lib/statusConfig";
 
 export default function CourseStatusGrid({
@@ -26,7 +27,7 @@ export default function CourseStatusGrid({
         header: "COURSE NO",
         Cell: ({ row }) =>
           row.original.moduleId ? (
-            <Link href={`/course/${row.original.moduleId}`}>
+            <Link href={`/course/${encodeId(row.original.moduleId)}`}>
               <span className="bg-[#3482AE] text-white px-2 py-1 rounded text-xs font-semibold cursor-pointer">
                 {row.original.no || "N/A"}
               </span>
@@ -50,7 +51,7 @@ export default function CourseStatusGrid({
         enableSorting: false,
         Cell: ({ row }) =>
           row.original.moduleId ? (
-            <Link href={`/course/${row.original.moduleId}/feedback`}>
+            <Link href={`/course/${encodeId(row.original.moduleId)}/feedback`}>
               <span className="bg-[#20c997] text-white px-2 py-1 rounded text-xs font-semibold cursor-pointer">
                 VIEW
               </span>

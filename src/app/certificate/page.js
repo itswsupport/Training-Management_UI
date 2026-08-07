@@ -8,6 +8,7 @@ import { Suspense } from "react";
 import { apiErrorMessage } from "@/config/api";
 import { useAuth } from "@/context/AuthContext";
 import { alerts } from "@/lib/alerts";
+import { decodeId } from "@/lib/courseId";
 import {
   CERT_ARTWORK,
   CERT_ASPECT,
@@ -50,7 +51,7 @@ function CertificateBody() {
   const { user, loading: authLoading } = useAuth();
   const empCode = getEmpCode(user);
 
-  const id = Number(searchParams.get("id"));
+  const id = decodeId(searchParams.get("id"));
   const shouldPrint = searchParams.get("print") === "1";
 
   const [state, setState] = useState({ status: "loading" });

@@ -5,6 +5,8 @@ import { useRef, useState } from "react";
 
 import { alerts } from "@/lib/alerts";
 import { apiErrorMessage } from "@/config/api";
+import { encodeId } from "@/lib/courseId";
+import { grantCourseAccess } from "@/lib/courseGrant";
 import { saveAnswer, submitAssignment } from "@/services/AssignmentService";
 
 const OPTION_LETTERS = ["A", "B", "C", "D"];
@@ -44,6 +46,8 @@ function readAnswered(empCode, emoduleId, sectionId) {
  * @param {boolean} [readOnly] a training officer checking the paper
  * @param {boolean} [submitted] the learner looking back at a paper they have
  *   already sat — the same inert form, but their own answers are filled in
+ * @param {boolean} [overdue] the course's quarter has lapsed; the paper can be
+ *   read but no longer answered or submitted
  * @param {Object<string, string>} [initialAnswers] what they answered, keyed by
  *   question id
  */
@@ -58,6 +62,7 @@ export default function AssignmentForm({
   lectureName = "",
   readOnly = false,
   submitted = false,
+  overdue = false,
   initialAnswers = null,
 }) {
   const router = useRouter();
@@ -65,9 +70,10 @@ export default function AssignmentForm({
   // Falls back to the shown questions when the page did not narrow to a lecture.
   const sectionQuestions = allQuestions ?? questions;
 
-  // Nothing can be answered or sent in either case: an officer is checking the
-  // paper, and a learner looking back has already sat it.
-  const inert = readOnly || submitted;
+  // Nothing can be answered or sent in any of these: an officer is checking the
+  // paper, a learner looking back has already sat it, and an overdue course's
+  // quarter has closed.
+  const inert = readOnly || submitted || overdue;
 
   const [answers, setAnswers] = useState(() => initialAnswers ?? {});
   const [answeredBefore, setAnsweredBefore] = useState(() =>
@@ -150,7 +156,10 @@ export default function AssignmentForm({
     });
   };
 
-  const back = () => router.push(`/course/${emoduleId}`);
+  const back = () => {
+    grantCourseAccess(emoduleId);
+    router.push(`/course/${encodeId(emoduleId)}`);
+  };
 
   const handleSubmit = async () => {
     setError(null);
@@ -186,7 +195,8 @@ export default function AssignmentForm({
           "This was the last assignment. The feedback form is mandatory — until you submit it, this course will not be marked completed.",
           "Assignment submitted"
         );
-        router.push(`/course/${emoduleId}/feedback`);
+        grantCourseAccess(emoduleId);
+        router.push(`/course/${encodeId(emoduleId)}/feedback`);
       } else {
         await alerts.success(
           "Your answers have been submitted successfully.",
@@ -227,10 +237,17 @@ export default function AssignmentForm({
         </p>
       ) : null}
 
-      {/* Both inert cases say why, because a form that quietly refuses to take a
-          click reads as broken. The SUBMIT / CANCEL pair is not rendered for
-          either. */}
-      {submitted ? (
+      {/* Every inert case says why, because a form that quietly refuses to take
+          a click reads as broken. The SUBMIT / CANCEL pair is not rendered for
+          any of them. Overdue is checked first: a lapsed quarter is the reason
+          nothing can be sent, whatever else is also true of the paper. */}
+      {overdue ? (
+        <p className="mx-2 rounded border border-[#dc3545] bg-[#dc3545]/10 px-3 py-2.5 text-[12px] normal-case text-[#c2384a]">
+          This course is overdue. Its quarter has closed, so the assignment can
+          be read but no longer answered or submitted. Please speak to your
+          training officer.
+        </p>
+      ) : submitted ? (
         <p className="mx-2 rounded border border-[#20c997] bg-[#20c997]/10 px-3 py-2.5 text-[12px] normal-case text-[#158765]">
           You have already submitted this assignment. Your answers are shown
           below for reference — it cannot be answered again.

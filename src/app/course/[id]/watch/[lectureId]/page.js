@@ -11,6 +11,8 @@ import {
 } from "@/components/course/CoursePreviewCard";
 import { apiErrorMessage } from "@/config/api";
 import { useAuth } from "@/context/AuthContext";
+import { useCourseAccess } from "@/hooks/useCourseAccess";
+import { decodeId, encodeId } from "@/lib/courseId";
 import { getEmpCode, isTrainingOfficer } from "@/lib/permissions";
 import { isFileVideoUrl, youTubeId } from "@/lib/video";
 import { materialUrl } from "@/services/ModuleService";
@@ -61,14 +63,17 @@ function markWatched(empCode, emoduleId, sectionId, lectureId, kind) {
 
 export default function WatchLecturePage({ params }) {
   const { id, lectureId: rawLectureId } = use(params);
-  const emoduleId = Number(id);
-  const lectureId = Number(rawLectureId);
+  const emoduleId = decodeId(id);
+  const lectureId = decodeId(rawLectureId);
 
   const { user, loading: authLoading } = useAuth();
   const empCode = getEmpCode(user);
   // An officer is checking the material, not working through it, so nothing
   // they play here is recorded — the same rule the course page applies.
   const preview = isTrainingOfficer(user);
+
+  // Guards the ids in the URL, which are otherwise anybody's to change.
+  const access = useCourseAccess(emoduleId);
 
   const [state, setState] = useState({ status: "loading" });
 
@@ -78,6 +83,10 @@ export default function WatchLecturePage({ params }) {
       setState({ status: "error", message: "This lecture could not be opened." });
       return undefined;
     }
+    // Nothing is fetched until the course is known to be this user's. A refused
+    // course stays on "loading" — the hook is already sending it away, and a
+    // message here would only announce what it declined to say.
+    if (!access.allowed) return undefined;
     let cancelled = false;
 
     (async () => {
@@ -110,7 +119,7 @@ export default function WatchLecturePage({ params }) {
         const { section, lecture } = found;
         // Video first, the same order the course content list offers them in.
         const url = lecture.materialVideo
-          ? materialUrl(lecture.materialVideo)
+          ? materialUrl(lecture.materialVideo, emoduleId)
           : lecture.link || null;
         const uploaded = Boolean(lecture.materialVideo);
 
@@ -143,7 +152,7 @@ export default function WatchLecturePage({ params }) {
     return () => {
       cancelled = true;
     };
-  }, [emoduleId, lectureId, empCode, authLoading]);
+  }, [emoduleId, lectureId, empCode, authLoading, access.allowed]);
 
   const ready = state.status === "ready";
   const videoId = ready && !state.uploaded ? youTubeId(state.url) : null;
@@ -187,7 +196,7 @@ export default function WatchLecturePage({ params }) {
           {state.lectureName || "Lecture"}
         </h2>
         <Link
-          href={`/course/${emoduleId}`}
+          href={`/course/${encodeId(emoduleId)}`}
           className="flex shrink-0 items-center gap-1 rounded bg-white/15 px-2.5 py-1 text-[11px] font-bold tracking-wide text-white uppercase transition hover:bg-white/25"
         >
           <ChevronLeft className="h-3 w-3" /> Course

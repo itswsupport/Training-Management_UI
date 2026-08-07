@@ -1,5 +1,7 @@
 "use client";
 
+import { clearCourseGrants } from "@/lib/courseGrant";
+
 /**
  * How long a signed-in session lasts.
  *
@@ -74,6 +76,9 @@ export function clearSession() {
   } catch {
     /* a blocked or full storage must not break signing out */
   }
+  // The course the session was last navigated to goes with it, or the next
+  // person to sign in on this browser could open it by typing its id.
+  clearCourseGrants();
 }
 
 /** The token to send with API calls, once the backend ever issues one. */

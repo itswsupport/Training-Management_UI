@@ -8,13 +8,15 @@ import autoTable from "jspdf-autotable";
 
 import ExoMaterialTable from "@/components/ui/common/ExoMaterialTable";
 import ExportActions from "@/components/ui/common/ExportActions";
+import { encodeId } from "@/lib/courseId";
 
 /**
  * The Pending / In-Process / Overdue course list, and the officer's module
  * list.
  *
- * `readOnly` (used for Overdue) renders the course code as a plain badge
- * instead of a link, so an overdue course can be seen but not opened.
+ * Overdue courses link like any other. They used to render as a dead badge, on
+ * the grounds that the quarter had lapsed — but that left a learner unable to
+ * open a course they are still marked as owing, and no other route to it.
  *
  * `manage` (the officer's ALL MODULES list) tags the course link so the course
  * page knows it was opened to be edited. The same officer reaching a course
@@ -25,7 +27,6 @@ export default function ModulesGrid({
   loading = false,
   error = null,
   onRetry,
-  readOnly = false,
   manage = false,
   title = "MODULES",
   headerColor = "#3482AE",
@@ -36,31 +37,21 @@ export default function ModulesGrid({
       {
         accessorKey: "no",
         header: "COURSE NO",
-        Cell: ({ row }) => {
-          const ref = row.original.no || "N/A";
-          if (readOnly) {
-            return (
-              <span className="bg-[#adb5bd] text-white px-2 py-1 rounded text-xs font-semibold">
-                {ref}
-              </span>
-            );
-          }
-          return (
-            <Link
-              href={`/course/${row.original.id}${manage ? "?from=officer" : ""}`}
-            >
-              <span className="bg-[#3482AE] text-white px-2 py-1 rounded text-xs font-semibold cursor-pointer">
-                {ref}
-              </span>
-            </Link>
-          );
-        },
+        Cell: ({ row }) => (
+          <Link
+            href={`/course/${encodeId(row.original.id)}${manage ? "?from=officer" : ""}`}
+          >
+            <span className="bg-[#3482AE] text-white px-2 py-1 rounded text-xs font-semibold cursor-pointer">
+              {row.original.no || "N/A"}
+            </span>
+          </Link>
+        ),
       },
       { accessorKey: "name", header: "COURSE NAME" },
       { accessorKey: "category", header: "COURSE CATEGORY" },
       { accessorKey: "instructor", header: "COURSE INSTRUCTOR" },
     ],
-    [readOnly, manage]
+    [manage]
   );
 
   const getExportData = () =>

@@ -7,6 +7,9 @@ import CourseFeedbackForm from "@/components/course/CourseFeedbackForm";
 import CourseNotice, { CourseLoading } from "@/components/course/CourseNotice";
 import { apiErrorMessage } from "@/config/api";
 import { useAuth } from "@/context/AuthContext";
+import { useCourseAccess } from "@/hooks/useCourseAccess";
+import { decodeId, encodeId } from "@/lib/courseId";
+import { grantCourseAccess } from "@/lib/courseGrant";
 import { getEmpCode } from "@/lib/permissions";
 import { getFeedbackQuestions, isFeedbackDue } from "@/services/FeedbackService";
 import { getCourseDetail } from "@/services/ModuleService";
@@ -18,11 +21,14 @@ import { getCourseDetail } from "@/services/ModuleService";
  */
 export default function CourseFeedbackPage({ params }) {
   const { id } = use(params);
-  const emoduleId = Number(id);
+  const emoduleId = decodeId(id);
 
   const router = useRouter();
   const { user } = useAuth();
   const empCode = getEmpCode(user);
+
+  // Guards the id in the URL, which is otherwise anybody's to change.
+  const access = useCourseAccess(emoduleId);
 
   const [state, setState] = useState({ status: "loading" });
 
@@ -36,10 +42,23 @@ export default function CourseFeedbackPage({ params }) {
   const nothingToFill = state.status === "notDue" || state.status === "empty";
 
   useEffect(() => {
-    if (nothingToFill) router.replace(`/course/${emoduleId}`);
-  }, [nothingToFill, emoduleId, router]);
+    // An overdue course keeps its own notice below rather than being bounced
+    // back to the course with nothing said.
+    if (!nothingToFill || access.overdue) return;
+    // Sending them back to the course counts as the app's own navigation.
+    grantCourseAccess(emoduleId);
+    router.replace(`/course/${encodeId(emoduleId)}`);
+  }, [nothingToFill, access.overdue, emoduleId, router]);
 
   useEffect(() => {
+    if (!Number.isFinite(emoduleId)) {
+      setState({ status: "error", message: "This course could not be found." });
+      return undefined;
+    }
+    // Nothing is fetched until the course is known to be this user's. A refused
+    // course stays on "loading" — the hook is already sending it away, and a
+    // message here would only announce what it declined to say.
+    if (!access.allowed) return undefined;
     if (!empCode) return undefined;
     let cancelled = false;
 
@@ -84,7 +103,23 @@ export default function CourseFeedbackPage({ params }) {
     return () => {
       cancelled = true;
     };
-  }, [emoduleId, empCode]);
+  }, [emoduleId, empCode, access.allowed]);
+
+  // Covers the ACCESS DENIED alert as well as the access lookup: neither may
+  // show any of the page behind it.
+  if (access.checking) return <CourseLoading />;
+
+  // Submitting feedback is what completes a course and records the grade, so an
+  // overdue course cannot be given any. There is no read-only version worth
+  // showing — the form exists only to be submitted.
+  if (access.overdue) {
+    return (
+      <CourseNotice tone="error" emoduleId={emoduleId} title="Course overdue">
+        This course is overdue and its quarter has closed, so feedback can no
+        longer be submitted. Please speak to your training officer.
+      </CourseNotice>
+    );
+  }
 
   // The spinner covers the redirect too — a blank frame for the moment the
   // route takes to change reads as a page that failed to load.

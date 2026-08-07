@@ -11,6 +11,7 @@ import {
 
 import CourseIncludes from "@/components/course/CourseIncludes";
 import useMaterialProgress from "@/hooks/useMaterialProgress";
+import { encodeId } from "@/lib/courseId";
 import { isFileVideoUrl, youTubeId } from "@/lib/video";
 
 /** Inlined at build time; the watch link is a plain anchor and needs it. */
@@ -338,7 +339,7 @@ export default function CoursePreviewCard({ course, active = null }) {
   const tracked = preview?.material;
   const watchHref =
     tracked && embeddable
-      ? `${BASE_PATH}/course/${tracked.emoduleId}/watch/${tracked.lectureId}`
+      ? `${BASE_PATH}/course/${encodeId(tracked.emoduleId)}/watch/${encodeId(tracked.lectureId)}`
       : null;
 
   const [playing, setPlaying] = useState(false);

@@ -12,6 +12,7 @@ import {
 
 import MaterialViewer from "@/components/course/MaterialViewer";
 import { useAuth } from "@/context/AuthContext";
+import { encodeId } from "@/lib/courseId";
 import { getEmpCode } from "@/lib/permissions";
 import {
   getAssignmentQuestions,
@@ -87,20 +88,20 @@ const lectureKey = (section, lecture, i, j) =>
  * lecture, so opening the PDF also marked the video watched and unlocked the
  * assignment without the video ever being played.
  */
-function materialsOf(lecture) {
+function materialsOf(lecture, emoduleId) {
   const list = [];
   if (lecture.link) list.push({ id: "link", kind: "link", href: lecture.link });
   if (lecture.materialVideo)
     list.push({
       id: "video",
       kind: "video",
-      href: materialUrl(lecture.materialVideo),
+      href: materialUrl(lecture.materialVideo, emoduleId),
     });
   if (lecture.materialFile)
     list.push({
       id: "file",
       kind: "file",
-      href: materialUrl(lecture.materialFile),
+      href: materialUrl(lecture.materialFile, emoduleId),
       name: fileName(lecture.materialFile),
       // How it opens in the page, if it can at all; see MaterialViewer.
       viewer: viewerFor(lecture.materialFile),
@@ -431,7 +432,7 @@ export default function CourseContent({
     isSubmitted(section)
       ? section.lectures.length
       : section.lectures.filter((l, j) =>
-          lectureDone(lectureKey(section, l, i, j), materialsOf(l))
+          lectureDone(lectureKey(section, l, i, j), materialsOf(l, emoduleId))
         ).length;
 
   const watchedCount = useMemo(
@@ -527,7 +528,7 @@ export default function CourseContent({
           !preview &&
           !sectionSubmitted &&
           section.lectures.some((l, j) => {
-            const materials = materialsOf(l);
+            const materials = materialsOf(l, emoduleId);
             return (
               materials.length > 0 &&
               !lectureDone(lectureKey(section, l, i, j), materials)
@@ -596,7 +597,7 @@ export default function CourseContent({
                 {section.lectures.map((lecture, j) => {
                   const key = lectureKey(section, lecture, i, j);
                   const expanded = openLectures.has(key);
-                  const materials = materialsOf(lecture);
+                  const materials = materialsOf(lecture, emoduleId);
                   // The row's button offers whatever is still outstanding, so a
                   // lecture with a video and a PDF asks for the video, then the
                   // PDF, rather than counting either one as the whole lecture.
@@ -748,13 +749,13 @@ export default function CourseContent({
                                   so it still goes to the browser. */}
                               <MaterialLink
                                 inPage={Boolean(viewerFor(lecture.materialFile))}
-                                href={materialUrl(lecture.materialFile)}
+                                href={materialUrl(lecture.materialFile, emoduleId)}
                                 onOpen={() =>
                                   openInPage(
                                     key,
                                     {
                                       id: "file",
-                                      href: materialUrl(lecture.materialFile),
+                                      href: materialUrl(lecture.materialFile, emoduleId),
                                       name: fileName(lecture.materialFile),
                                       viewer: viewerFor(lecture.materialFile),
                                     },
@@ -788,14 +789,14 @@ export default function CourseContent({
                               </span>
                               <MaterialLink
                                 inPage={Boolean(onPlay)}
-                                href={materialUrl(lecture.materialVideo)}
+                                href={materialUrl(lecture.materialVideo, emoduleId)}
                                 onOpen={() =>
                                   playInCard(
                                     key,
                                     {
                                       id: "video",
                                       kind: "video",
-                                      href: materialUrl(lecture.materialVideo),
+                                      href: materialUrl(lecture.materialVideo, emoduleId),
                                     },
                                     lecture.name,
                                     {
@@ -870,7 +871,7 @@ export default function CourseContent({
                                 // badge, so a learner could never look back at
                                 // what they had answered. It opens read-only.
                                 <Link
-                                  href={`/course/${emoduleId}/assignment/${section.id}?lectureId=${lecture.id}`}
+                                  href={`/course/${encodeId(emoduleId)}/assignment/${encodeId(section.id)}?lectureId=${encodeId(lecture.id)}`}
                                   className="inline-flex items-center gap-1.5 rounded bg-[#20c997]/15 px-2.5 py-1 text-[11px] font-bold tracking-wide text-[#158765] uppercase transition-colors hover:bg-[#20c997]/25"
                                 >
                                   <CircleCheckBig className="h-3 w-3" />
@@ -885,7 +886,7 @@ export default function CourseContent({
                                 </span>
                               ) : (
                                 <Link
-                                  href={`/course/${emoduleId}/assignment/${section.id}?lectureId=${lecture.id}`}
+                                  href={`/course/${encodeId(emoduleId)}/assignment/${encodeId(section.id)}?lectureId=${encodeId(lecture.id)}`}
                                   className="inline-flex items-center gap-1.5 rounded bg-[#20c997] px-3 py-1.5 text-[11px] font-bold tracking-wide text-white uppercase transition-colors hover:bg-[#1aa179]"
                                 >
                                   <CircleCheckBig className="h-3 w-3" />
@@ -913,7 +914,7 @@ export default function CourseContent({
                       <div className="flex items-center gap-3">
                         <CircleCheckBig className="h-4 w-4 shrink-0 text-[#20c997]" />
                         <Link
-                          href={`/course/${emoduleId}/assignment/${section.id}`}
+                          href={`/course/${encodeId(emoduleId)}/assignment/${encodeId(section.id)}`}
                           className="text-[13px] font-semibold normal-case text-[#158765] underline underline-offset-2 hover:text-[#12705a]"
                         >
                           Assignment submitted — view your answers
@@ -936,7 +937,7 @@ export default function CourseContent({
                       <div className="flex items-center gap-3">
                         <CircleCheckBig className="h-4 w-4 shrink-0 text-[#20c997]" />
                         <Link
-                          href={`/course/${emoduleId}/assignment/${section.id}`}
+                          href={`/course/${encodeId(emoduleId)}/assignment/${encodeId(section.id)}`}
                           className="text-[13px] font-semibold normal-case text-[#3482AE] underline underline-offset-2 hover:text-[#2b6b90]"
                         >
                           {preview ? "View assignment" : "Start assignment"}

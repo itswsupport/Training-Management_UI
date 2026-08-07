@@ -526,10 +526,26 @@ export async function submitModule({ emoduleId, regards, deptIds, gradeIds }) {
   }
 }
 
-/** Direct URL to a lecture's uploaded material (PDF or video). */
-export function materialUrl(path) {
+/**
+ * Direct URL to a lecture's uploaded material (PDF or video).
+ *
+ * `emoduleId` is optional and only helps the backend find the file: materials
+ * used to be stored flat under material/ and are now stored per module under
+ * material/files/<id>/, so the path recorded against an older lecture no longer
+ * leads anywhere. `/trainingMaterial/file` falls back to searching for the name,
+ * and the module id is what lets it look in one folder instead of all of them.
+ *
+ * @param {string} path the stored material path, passed through untouched
+ * @param {number|string} [emoduleId]
+ */
+export function materialUrl(path, emoduleId) {
   const name = String(path ?? "").split(/[\\/]/).pop() || "file.pdf";
-  return `${getApiUrl("/trainingMaterial/file")}?file_name=${encodeURIComponent(
-    name
-  )}&file_path=${encodeURIComponent(path)}`;
+  const query = [
+    `file_name=${encodeURIComponent(name)}`,
+    `file_path=${encodeURIComponent(path)}`,
+  ];
+  if (emoduleId != null && String(emoduleId).trim() !== "") {
+    query.push(`emodule_id=${encodeURIComponent(emoduleId)}`);
+  }
+  return `${getApiUrl("/trainingMaterial/file")}?${query.join("&")}`;
 }

@@ -23,7 +23,9 @@ import TopicsCovered from "@/components/course/TopicsCovered";
 import WhatYouLearn from "@/components/course/WhatYouLearn";
 import { apiErrorMessage } from "@/config/api";
 import { useAuth } from "@/context/AuthContext";
+import { useCourseAccess } from "@/hooks/useCourseAccess";
 import { alerts } from "@/lib/alerts";
+import { decodeId, encodeId } from "@/lib/courseId";
 import { getEmpCode, isTrainingOfficer } from "@/lib/permissions";
 import { getModuleFormOptions } from "@/services/MasterDataService";
 import { getCourseDetail } from "@/services/ModuleService";
@@ -42,8 +44,10 @@ function Chip({ icon, text }) {
 
 export default function CourseViewPage({ params }) {
   // `params` is a Promise in this Next version — unwrapped with React's `use`.
+  // The segment is an obfuscated token, not the id itself; a token this app did
+  // not mint decodes to NaN and is handled as a course that does not exist.
   const { id } = use(params);
-  const emoduleId = Number(id);
+  const emoduleId = decodeId(id);
 
   const { user } = useAuth();
   const empCode = getEmpCode(user);
@@ -61,6 +65,10 @@ export default function CourseViewPage({ params }) {
   }, []);
 
   const canEdit = isTrainingOfficer(user) && fromOfficer;
+
+  // Whether this course is this user's to open at all. Guards the id in the
+  // URL, which is otherwise anybody's to change.
+  const access = useCourseAccess(emoduleId);
 
   const [course, setCourse] = useState(null);
   const [feedbackDue, setFeedbackDue] = useState(false);
@@ -108,6 +116,14 @@ export default function CourseViewPage({ params }) {
   /** Re-reads the course; also used to show an officer their saved edits. */
   const loadCourse = useCallback(
     async ({ silent = false } = {}) => {
+      if (!Number.isFinite(emoduleId)) {
+        setLoadError("This course could not be found.");
+        setLoading(false);
+        return;
+      }
+      // Nothing is fetched until the course is known to be this user's, so an
+      // id typed into the address bar never reaches the API at all.
+      if (!access.allowed) return;
       if (!silent) setLoading(true);
       setLoadError(null);
       try {
@@ -132,7 +148,7 @@ export default function CourseViewPage({ params }) {
         if (!silent) setLoading(false);
       }
     },
-    [emoduleId, empCode]
+    [emoduleId, empCode, access.allowed]
   );
 
   useEffect(() => {
@@ -159,7 +175,9 @@ export default function CourseViewPage({ params }) {
     }
   }, [loadCourse]);
 
-  if (loading) {
+  // `checking` also covers a refused course, which is on its way to the
+  // dashboard — it must show the spinner rather than any of the content below.
+  if (access.checking || loading) {
     return (
       <div className="bg-white rounded shadow border border-gray-200 overflow-hidden text-[12px]">
         <div className="flex justify-center items-center p-8">
@@ -271,7 +289,7 @@ export default function CourseViewPage({ params }) {
             <div className="flex shrink-0 flex-wrap items-center gap-2">
               {feedbackDue ? (
                 <Link
-                  href={`/course/${course.id}/feedback`}
+                  href={`/course/${encodeId(course.id)}/feedback`}
                   className="rounded bg-white px-4 py-2 text-[12px] font-bold tracking-wide text-[#c2384a] uppercase shadow transition hover:bg-[#dc3545]/10"
                 >
                   Feedback Form

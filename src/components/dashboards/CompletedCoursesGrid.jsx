@@ -11,6 +11,7 @@ import ExoMaterialTable from "@/components/ui/common/ExoMaterialTable";
 import ExportActions from "@/components/ui/common/ExportActions";
 import { alerts } from "@/lib/alerts";
 import { downloadCertificate } from "@/lib/certificate";
+import { encodeId } from "@/lib/courseId";
 
 const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || "/etms";
 
@@ -19,7 +20,7 @@ const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || "/etms";
  * the name / course / date / grade from the signed-in employee's own completed
  * record, so the values can't be forged by editing the URL.
  */
-const certHref = (row) => `${BASE_PATH}/certificate?id=${encodeURIComponent(row.id)}`;
+const certHref = (row) => `${BASE_PATH}/certificate?id=${encodeId(row.id)}`;
 
 /**
  * The values printed on the sheet, taken from the row the employee's own
@@ -64,7 +65,7 @@ export default function CompletedCoursesGrid({
         accessorKey: "no",
         header: "COURSE NO",
         Cell: ({ row }) => (
-          <Link href={`/course/${row.original.id}`}>
+          <Link href={`/course/${encodeId(row.original.id)}`}>
             <span className="bg-[#3482AE] text-white px-2 py-1 rounded text-xs font-semibold cursor-pointer">
               {row.original.no || "N/A"}
             </span>

@@ -3,6 +3,8 @@
 import React from "react";
 import Link from "next/link";
 
+import { encodeId } from "@/lib/courseId";
+
 /**
  * The card shown in place of a course form when there is nothing to fill in —
  * already submitted, not pending, no questions set up, or a load failure.
@@ -10,6 +12,11 @@ import Link from "next/link";
  */
 export default function CourseNotice({ tone = "info", emoduleId, title, children }) {
   const headerColor = tone === "error" ? "#dc3545" : "#3482AE";
+
+  // An unreadable URL token leaves no course to go back to — the dashboard is
+  // the only honest destination.
+  const token = encodeId(emoduleId);
+  const backHref = token ? `/course/${token}` : "/UserDashboard";
 
   return (
     <div className="bg-white rounded shadow border border-gray-200 overflow-hidden text-[12px] mx-auto max-w-md">
@@ -25,10 +32,10 @@ export default function CourseNotice({ tone = "info", emoduleId, title, children
           {children}
         </p>
         <Link
-          href={`/course/${emoduleId}`}
+          href={backHref}
           className="inline-block px-6 py-2 bg-[#3482AE] text-white text-sm font-semibold rounded shadow hover:bg-[#2a6a8f] transition-colors"
         >
-          BACK TO COURSE
+          {token ? "BACK TO COURSE" : "BACK TO DASHBOARD"}
         </Link>
       </div>
     </div>

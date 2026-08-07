@@ -5,6 +5,8 @@ import { useState } from "react";
 
 import { alerts } from "@/lib/alerts";
 import { apiErrorMessage } from "@/config/api";
+import { encodeId } from "@/lib/courseId";
+import { grantCourseAccess } from "@/lib/courseGrant";
 import { isOpenEnded, submitFeedback } from "@/services/FeedbackService";
 
 const OPTION_LETTERS = ["A", "B", "C", "D", "E"];
@@ -27,7 +29,10 @@ export default function CourseFeedbackForm({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
 
-  const back = () => router.push(`/course/${emoduleId}`);
+  const back = () => {
+    grantCourseAccess(emoduleId);
+    router.push(`/course/${encodeId(emoduleId)}`);
+  };
   const set = (questionId, value) =>
     setAnswers((prev) => ({ ...prev, [questionId]: value }));
 
