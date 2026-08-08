@@ -80,10 +80,18 @@ export default function CourseStatusGrid({
       { accessorKey: "empName", header: "EMPLOYEE NAME" },
       { accessorKey: "designation", header: "DESIGNATION" },
       { accessorKey: "course", header: "COURSE" },
-      // KRA QUARTER already spells out the year and quarter with their dates,
-      // so this screen shows that one column rather than the same value three
-      // ways. The filter bar above still works on the year and quarter behind
-      // it — the row carries them whether or not a column shows them.
+      // The year on its own, ahead of the span it belongs to. KRA QUARTER
+      // carries the same year inside its dates, but buried in prose the eye has
+      // to parse — and for quarter 4 the dates read as the NEXT calendar year,
+      // so the column beside it is the only place the financial year is stated
+      // plainly. Derived the same way the filter above matches, so the two can
+      // never disagree.
+      {
+        id: "financialYear",
+        header: "YEAR",
+        accessorFn: (row) => row.financialYear || "",
+        Cell: ({ row }) => row.original.financialYear || "—",
+      },
       { accessorKey: "kraQuarter", header: "KRA QUARTER" },
       { accessorKey: "grade", header: "GRADE" },
       {
@@ -140,6 +148,7 @@ export default function CourseStatusGrid({
       "EMPLOYEE NAME": item.empName,
       DESIGNATION: item.designation,
       COURSE: item.course,
+      YEAR: item.financialYear || "",
       "KRA QUARTER": item.kraQuarter,
       GRADE: item.grade,
       STATUS: getCourseStatusConfig(item.status).text,

@@ -9,7 +9,11 @@ import { useAuth } from "@/context/AuthContext";
 import { getEmpCode } from "@/lib/permissions";
 import { alerts } from "@/lib/alerts";
 import { apiErrorMessage } from "@/config/api";
-import { QUARTER_OPTIONS, instructorName } from "@/services/MasterDataService";
+import {
+  QUARTER_OPTIONS,
+  financialYearOf,
+  instructorName,
+} from "@/services/MasterDataService";
 import { updateModuleDetails } from "@/services/ModuleService";
 
 // Same field styling as the Add Module form, so the two read as one thing.
@@ -41,12 +45,13 @@ export default function CourseDetailsEditor({ course, options, ref }) {
   const [categoryId, setCategoryId] = useState(course.categoryId);
   const [author, setAuthor] = useState(course.instructor);
   const [description, setDescription] = useState(course.description);
-  // Read-only: the quarter is displayed but never edited, so it is derived
-  // rather than held in state. Courses raised before the quarter fields existed
-  // have none to show.
+  // Read-only: both are displayed but never edited, so they are derived rather
+  // than held in state. Courses raised before the quarter fields existed have
+  // neither to show.
   const quarterLabel =
     QUARTER_OPTIONS.find((q) => q.value === String(course.quarter))?.label ??
     (course.kraQuarter || "Not set");
+  const yearLabel = financialYearOf(course.kraQuarter) || "Not set";
   const [objectives, setObjectives] = useState(
     course.objectives.length ? course.objectives : [""]
   );
@@ -208,6 +213,21 @@ export default function CourseDetailsEditor({ course, options, ref }) {
             — to the same people, for a period they have already been reported
             on. The quarter is fixed when the course is raised; a course wanted
             for the next quarter is a new course. */}
+        {/* Shown beside the quarter and locked for the same reason: the year is
+            the other half of the window the course was assigned against, and a
+            quarter without it reads as any year's. Both are here because the
+            Add Module form asks for both, and an edit screen that shows only
+            one of them looks like it lost the other. */}
+        <Field label="FINANCIAL YEAR:">
+          <div
+            title="A course's financial year is fixed when it is created and cannot be changed here."
+            className={`${inputCls} flex cursor-not-allowed items-center justify-between gap-2 bg-gray-100 text-gray-600`}
+          >
+            <span>{yearLabel}</span>
+            <Lock className="h-3.5 w-3.5 shrink-0 text-gray-400" />
+          </div>
+        </Field>
+
         <Field label="APPLICABLE QUARTER:">
           <div
             title="A course's quarter is fixed when it is created and cannot be changed here."
