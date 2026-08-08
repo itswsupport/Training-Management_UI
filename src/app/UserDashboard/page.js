@@ -12,11 +12,21 @@ import {
 
 import StatusCard from "@/components/StatusCard";
 import CompletedCoursesGrid from "@/components/dashboards/CompletedCoursesGrid";
+import FilterBar from "@/components/dashboards/FilterBar";
 import ModulesGrid from "@/components/dashboards/ModulesGrid";
+import QuarterFilters from "@/components/dashboards/QuarterFilters";
 import { useAuth } from "@/context/AuthContext";
+import {
+  LEARNER_FILTER_KEY,
+  useQuarterFilter,
+} from "@/hooks/useQuarterFilter";
 import { getEmpCode } from "@/lib/permissions";
 import { apiErrorMessage } from "@/config/api";
-import { COURSE_STATUS, getUserCourses } from "@/services/UserCourseService";
+import {
+  COURSE_STATUS,
+  getUserCourses,
+  getUserCoursesWithStamps,
+} from "@/services/UserCourseService";
 
 const TAB_CONFIG = [
   {
@@ -62,6 +72,10 @@ export default function UserDashboard() {
   const { user } = useAuth();
   const empCode = getEmpCode(user);
 
+  // One selection across all four tabs, on its own key so a learner who is also
+  // a training officer does not carry one screen's filter into the other.
+  const filter = useQuarterFilter(LEARNER_FILTER_KEY);
+
   const [activeTab, setActiveTab] = useState("pending");
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -76,14 +90,25 @@ export default function UserDashboard() {
     try {
       setLoading(true);
       setError(null);
-      setData(await getUserCourses(empCode, active.status));
+      // Only the lists that show an ASSIGNED ON column pay for the history
+      // read behind it — the completed list shows when the course was
+      // finished, which is on the learner's own row already.
+      const quarterFilter = {
+        financialYear: filter.year,
+        quarter: filter.quarter,
+      };
+      setData(
+        active.status === COURSE_STATUS.COMPLETED
+          ? await getUserCourses(empCode, active.status, quarterFilter)
+          : await getUserCoursesWithStamps(empCode, active.status, quarterFilter)
+      );
     } catch (err) {
       setData([]);
       setError(apiErrorMessage(err, "Failed to fetch your courses"));
     } finally {
       setLoading(false);
     }
-  }, [empCode, active.status]);
+  }, [empCode, active.status, filter.year, filter.quarter]);
 
   useEffect(() => {
     fetchCourses();
@@ -121,6 +146,17 @@ export default function UserDashboard() {
 
       {/* Tab Content */}
       <main className="w-full overflow-x-hidden">
+        {/* Above the heading and shared by every tab, so switching between
+            Pending and Completed keeps the quarter being looked at. */}
+        <FilterBar accent={active.accent}>
+          <QuarterFilters
+            year={filter.year}
+            quarter={filter.quarter}
+            onYearChange={filter.setYear}
+            onQuarterChange={filter.setQuarter}
+          />
+        </FilterBar>
+
         {active.id === "completed" ? (
           <CompletedCoursesGrid
             data={data}

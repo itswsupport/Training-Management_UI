@@ -8,12 +8,72 @@
  */
 
 import { api, sendForm, unwrap } from "@/config/api";
-import { clean } from "@/utils/etmsFormat";
+import { clean, displayStamp } from "@/utils/etmsFormat";
 import { getAssignmentCount } from "./AssignmentService";
 import { COURSE_STATUS, getUserCourses } from "./UserCourseService";
 
 /** A question with no options is an open-ended (free-text) one. */
 export const isOpenEnded = (question) => question.options.length === 0;
+
+/**
+ * One employee's submitted feedback for one course, for the officer's review.
+ *
+ * The stored rows are self-contained: `/feedback/save` writes the question and
+ * all five of its options alongside the answer, so what comes back is the form
+ * as it stood when it was filled in. That matters — editing the question bank
+ * afterwards does not rewrite what anyone answered, and reading the answers
+ * against today's template would misreport every older submission.
+ *
+ * `selectedAnswer` is the chosen option's own text, not its index, so an answer
+ * is readable without matching it back to a list.
+ *
+ * @param {string|number} empCode
+ * @param {string|number} moduleId
+ * @returns {Promise<{employeeName: string, courseName: string,
+ *   submittedOn: {date: string, time: string},
+ *   answers: {id: number, question: string, answer: string,
+ *     options: string[], openEnded: boolean}[]}|null>} null when they have
+ *   submitted nothing
+ */
+export async function getSubmittedFeedback(empCode, moduleId) {
+  const rows =
+    unwrap(
+      await api.get("/feedback/by_emoduleId/byempcode", {
+        params: { empCode, moduleId },
+      }),
+      []
+    ) ?? [];
+
+  if (rows.length === 0) return null;
+
+  const [first] = rows;
+  return {
+    employeeName: clean(first.employeeName),
+    courseName: clean(first.moduleName),
+    submittedOn: displayStamp(first.regDate, first.regTime),
+    answers: rows.map((row, index) => {
+      const options = [
+        row.optionOne,
+        row.optionTwo,
+        row.optionThree,
+        row.optionFour,
+        row.optionFive,
+      ]
+        .map(clean)
+        .filter(Boolean);
+
+      return {
+        id: row.id ?? index,
+        question: clean(row.question),
+        answer: clean(row.selectedAnswer),
+        options,
+        // The same rule the form itself uses: no options means free text, and
+        // the answer is whatever the employee typed.
+        openEnded: options.length === 0,
+      };
+    }),
+  };
+}
 
 /** The whole feedback form template, in display order. */
 export async function getFeedbackQuestions() {

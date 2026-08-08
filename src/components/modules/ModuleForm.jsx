@@ -1,16 +1,19 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ChevronDown, Plus, X } from "lucide-react";
 
 import MultiSelect from "@/components/ui/common/MultiSelect";
 import SearchableSelect from "@/components/ui/common/SearchableSelect";
+import YearPicker from "@/components/ui/common/YearPicker";
 import { alerts } from "@/lib/alerts";
 import { apiErrorMessage } from "@/config/api";
 import {
   QUARTER_OPTIONS,
+  currentFinancialYear,
   instructorName,
+  isQuarterClosed,
   quarterMeta,
 } from "@/services/MasterDataService";
 import {
@@ -71,7 +74,11 @@ const emptyQuestion = () => ({
 
 // payroll-ui form styling: bold teal uppercase labels, gray-bordered 12px
 // fields with a blue focus ring, a teal primary button and a red cancel.
-const labelCls = "mb-1 block text-[12px] font-bold text-[#3482AE] uppercase";
+// nowrap: these labels head narrow columns, and "APPLICABLE QUARTER:" breaking
+// over two lines pushed its field a line lower than the one beside it. They are
+// all short enough to hold a single line at any width the form is used at.
+const labelCls =
+  "mb-1 block text-[12px] font-bold whitespace-nowrap text-[#3482AE] uppercase";
 const groupLabelCls = "block text-[12px] font-bold text-[#3482AE] uppercase";
 const inputCls =
   "w-full rounded border border-gray-300 bg-white px-3 py-2 text-[12px] text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-[#3482AE] focus:ring-2 focus:ring-[#3482AE]/30";
@@ -615,7 +622,40 @@ export default function ModuleForm({
   const [categoryId, setCategoryId] = useState("");
   const [author, setAuthor] = useState("");
   const [description, setDescription] = useState("");
+  const [financialYear, setFinancialYear] = useState(
+    options.defaultFinancialYear
+  );
   const [quarter, setQuarter] = useState(options.defaultQuarter);
+
+  // The financial year cannot run backwards from here: a course raised for a
+  // year that has ended has no window left to be completed in.
+  const earliestYear = useMemo(() => currentFinancialYear(), []);
+
+  /**
+   * Only the quarters still open in the chosen year.
+   *
+   * A quarter that has closed cannot be trained in — its validTill is already
+   * past, so the course would be created expired and every employee it went to
+   * would find it overdue on the day it arrived. Which quarters those are
+   * depends on the year: pick next year and all four are open again.
+   */
+  const quarterChoices = useMemo(
+    () =>
+      QUARTER_OPTIONS.filter(
+        (option) =>
+          !isQuarterClosed(quarterMeta(option.value, financialYear).validTill)
+      ),
+    [financialYear]
+  );
+
+  // Changing the year can retire the quarter that was chosen — Q1 is open for
+  // next year and closed for this one. Resolved while rendering rather than
+  // corrected afterwards in an effect: a state write for something already
+  // known costs a second render, and for one of those renders the form would
+  // be holding a quarter it is not offering.
+  const selectedQuarter = quarterChoices.some((o) => o.value === quarter)
+    ? quarter
+    : (quarterChoices[0]?.value ?? "");
   const [objectives, setObjectives] = useState([""]);
   const [deptIds, setDeptIds] = useState([]);
   const [gradeIds, setGradeIds] = useState([]);
@@ -654,7 +694,10 @@ export default function ModuleForm({
     setSubmitting(true);
     try {
       setProgress("Creating module…");
-      const { kraQuarter, validTill } = quarterMeta(quarter);
+      const { kraQuarter, validTill } = quarterMeta(
+        selectedQuarter,
+        financialYear
+      );
       const emoduleId = await saveModule({
         name,
         categoryId,
@@ -802,54 +845,81 @@ export default function ModuleForm({
             />
           </Field>
 
-          <Field label="APPLICABLE QUARTER:">
-            <SearchableSelect
-              options={QUARTER_OPTIONS}
-              value={quarter}
-              onChange={setQuarter}
-              placeholder="- Select Quarter -"
-              searchPlaceholder="Search quarter…"
-            />
-          </Field>
+          {/* Year, quarter and objective share the last row. The outer grid is
+              three equal columns and cannot express "narrow, narrow, wide", so
+              this row runs its own twelve-column grid: the two dropdowns hold
+              one short value each and the objective is free text that grows a
+              line per entry, and so takes the rest.
 
-          <div className="md:col-span-2">
-            <span className={labelCls}>LEARNING OBJECTIVE:</span>
-            <div className="space-y-2">
-              {objectives.map((obj, i) => (
-                <div key={i} className="flex gap-2">
-                  <input
-                    value={obj}
-                    onChange={(e) =>
-                      setObjectives((prev) =>
-                        prev.map((o, j) => (j === i ? e.target.value : o))
-                      )
-                    }
-                    placeholder="Learning Objective"
-                    className={inputCls}
-                  />
-                  {i === objectives.length - 1 ? (
-                    <button
-                      type="button"
-                      onClick={() => setObjectives((prev) => [...prev, ""])}
-                      className="shrink-0 rounded bg-[#3482AE] px-3 text-white hover:bg-[#2b6b90]"
-                      aria-label="Add objective"
-                    >
-                      <Plus className="h-3.5 w-3.5" />
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setObjectives((prev) => prev.filter((_, j) => j !== i))
+              items-start, not the grid's stretch: a cell that stretches makes
+              its field as tall as the tallest column, so adding a second
+              objective grew the year and quarter boxes to match it. Each field
+              now keeps its own height and the three labels stay on one line. */}
+          <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-12 items-start gap-x-6 gap-y-4">
+            <div className="md:col-span-3">
+              <Field label="FINANCIAL YEAR:">
+                <YearPicker
+                  label=""
+                  value={financialYear}
+                  onChange={setFinancialYear}
+                  allowAll={false}
+                  minYear={earliestYear}
+                  triggerClassName={inputCls}
+                />
+              </Field>
+            </div>
+
+            <div className="md:col-span-3">
+              <Field label="APPLICABLE QUARTER:">
+                <SearchableSelect
+                  options={quarterChoices}
+                  value={selectedQuarter}
+                  onChange={setQuarter}
+                  placeholder="- Select Quarter -"
+                  searchPlaceholder="Search quarter…"
+                />
+              </Field>
+            </div>
+
+            <div className="md:col-span-6">
+              <span className={labelCls}>LEARNING OBJECTIVE:</span>
+              <div className="space-y-2">
+                {objectives.map((obj, i) => (
+                  <div key={i} className="flex gap-2">
+                    <input
+                      value={obj}
+                      onChange={(e) =>
+                        setObjectives((prev) =>
+                          prev.map((o, j) => (j === i ? e.target.value : o))
+                        )
                       }
-                      className="shrink-0 rounded bg-[#f23a4c] px-3 text-white hover:bg-[#d92e3f]"
-                      aria-label="Remove objective"
-                    >
-                      ×
-                    </button>
-                  )}
-                </div>
-              ))}
+                      placeholder="Learning Objective"
+                      className={inputCls}
+                    />
+                    {i === objectives.length - 1 ? (
+                      <button
+                        type="button"
+                        onClick={() => setObjectives((prev) => [...prev, ""])}
+                        className="shrink-0 rounded bg-[#3482AE] px-3 text-white hover:bg-[#2b6b90]"
+                        aria-label="Add objective"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setObjectives((prev) => prev.filter((_, j) => j !== i))
+                        }
+                        className="shrink-0 rounded bg-[#f23a4c] px-3 text-white hover:bg-[#d92e3f]"
+                        aria-label="Remove objective"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </div>

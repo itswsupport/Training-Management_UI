@@ -7,6 +7,7 @@ import {
   CalendarDays,
   FileText,
   Layers,
+  Lock,
   Pencil,
   Sparkles,
   User,
@@ -27,7 +28,10 @@ import { useCourseAccess } from "@/hooks/useCourseAccess";
 import { alerts } from "@/lib/alerts";
 import { decodeId, encodeId } from "@/lib/courseId";
 import { getEmpCode, isTrainingOfficer } from "@/lib/permissions";
-import { getModuleFormOptions } from "@/services/MasterDataService";
+import {
+  getModuleFormOptions,
+  isQuarterClosed,
+} from "@/services/MasterDataService";
 import { getCourseDetail } from "@/services/ModuleService";
 import { isFeedbackDue } from "@/services/FeedbackService";
 import { getUpdateSinceCompletion } from "@/services/UserCourseService";
@@ -64,7 +68,10 @@ export default function CourseViewPage({ params }) {
     );
   }, []);
 
-  const canEdit = isTrainingOfficer(user) && fromOfficer;
+  // The officer's view of the course: their history panel hangs off this, and
+  // it stays available whatever the quarter has done — a closed quarter is a
+  // reason to stop changing the record, not to stop reading it.
+  const officerView = isTrainingOfficer(user) && fromOfficer;
 
   // Whether this course is this user's to open at all. Guards the id in the
   // URL, which is otherwise anybody's to change.
@@ -82,6 +89,15 @@ export default function CourseViewPage({ params }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
 
+  // Once the quarter a course was raised for has passed, its record is closed:
+  // the officer can no longer change its details or put it in front of another
+  // department or grade, because both of those happen through the same edit
+  // form and would re-assign a course against a window that has already been
+  // reported on. Unknown until the course has loaded, and undated modules are
+  // never closed — see isQuarterClosed.
+  const quarterClosed = isQuarterClosed(course?.validTill);
+  const canEdit = officerView && !quarterClosed;
+
   // Officer edit mode. The form's dropdown data is only fetched when EDIT is
   // pressed, so a learner viewing the course never pays for it.
   const [editing, setEditing] = useState(false);
@@ -95,6 +111,9 @@ export default function CourseViewPage({ params }) {
   const [saving, setSaving] = useState(false);
 
   const startEditing = useCallback(async () => {
+    // The button is not rendered for a closed quarter; this is the same rule
+    // stated where the editor actually opens, so no other caller can get in.
+    if (!canEdit) return;
     if (options) {
       setEditing(true);
       return;
@@ -111,7 +130,7 @@ export default function CourseViewPage({ params }) {
     } finally {
       setOpeningEditor(false);
     }
-  }, [options]);
+  }, [options, canEdit]);
 
   /** Re-reads the course; also used to show an officer their saved edits. */
   const loadCourse = useCallback(
@@ -162,6 +181,18 @@ export default function CourseViewPage({ params }) {
    * just leaves the form open with everything still typed in.
    */
   const handleSaveAll = useCallback(async () => {
+    // A form opened while the quarter was still open, and submitted after it
+    // closed — a tab left overnight on the 30th does exactly this. Refused
+    // here rather than written and reported as saved.
+    if (!canEdit) {
+      await alerts.warning(
+        "This course's quarter has ended, so its details can no longer be changed.",
+        "Quarter closed"
+      );
+      setEditing(false);
+      return;
+    }
+
     setSaving(true);
     try {
       if (!(await detailsRef.current?.save())) return;
@@ -173,7 +204,7 @@ export default function CourseViewPage({ params }) {
     } finally {
       setSaving(false);
     }
-  }, [loadCourse]);
+  }, [loadCourse, canEdit]);
 
   // `checking` also covers a refused course, which is on its way to the
   // dashboard — it must show the spinner rather than any of the content below.
@@ -199,7 +230,7 @@ export default function CourseViewPage({ params }) {
 
   // Officer edit mode replaces the course header with the details form; the
   // sections and lectures below stay as they are, read-only.
-  if (editing && options) {
+  if (editing && options && canEdit) {
     return (
       <div className="w-full space-y-5">
         <CourseDetailsEditor
@@ -306,6 +337,18 @@ export default function CourseViewPage({ params }) {
                   {openingEditor ? "Opening…" : "Edit"}
                 </button>
               ) : null}
+              {/* Said, not merely withheld: an officer who finds the button
+                  gone should be told the quarter closed it, not left looking
+                  for it. */}
+              {officerView && quarterClosed ? (
+                <span
+                  title={`This course's quarter ended on ${course.validTill}. Its details and the departments and grades it is assigned to can no longer be changed.`}
+                  className="flex items-center gap-2 rounded bg-white/15 px-4 py-2 text-[12px] font-bold tracking-wide text-white/90 uppercase"
+                >
+                  <Lock className="h-3.5 w-3.5" />
+                  Quarter closed
+                </span>
+              ) : null}
             </div>
           </div>
 
@@ -390,7 +433,7 @@ export default function CourseViewPage({ params }) {
 
       {/* Only a training officer who came from the officer dashboard's module
           list gets this; learners never see it. */}
-      {canEdit ? <CourseHistory emoduleId={course.id} /> : null}
+      {officerView ? <CourseHistory emoduleId={course.id} /> : null}
     </div>
   );
 }

@@ -9,6 +9,7 @@ import autoTable from "jspdf-autotable";
 import ExoMaterialTable from "@/components/ui/common/ExoMaterialTable";
 import ExportActions from "@/components/ui/common/ExportActions";
 import { encodeId } from "@/lib/courseId";
+import { quarterLabel } from "@/services/MasterDataService";
 
 /**
  * The Pending / In-Process / Overdue course list, and the officer's module
@@ -32,6 +33,12 @@ export default function ModulesGrid({
   headerColor = "#3482AE",
   emptyMessage = "No courses found",
 }) {
+  // `data` is already the filtered set: the filter bar above the heading is
+  // sent to the backend, which returns only the rows asked for. Nothing is
+  // dropped here, so the table, the empty state and every export agree by
+  // construction.
+  const rows = data;
+
   const columns = React.useMemo(
     () => [
       {
@@ -50,16 +57,45 @@ export default function ModulesGrid({
       { accessorKey: "name", header: "COURSE NAME" },
       { accessorKey: "category", header: "COURSE CATEGORY" },
       { accessorKey: "instructor", header: "COURSE INSTRUCTOR" },
+      // The two the filter bar above works on, shown so a filtered list says
+      // what it is filtered to and an unfiltered one can be read by eye. Older
+      // courses carry no quarter at all, which is why both fall back to a dash
+      // rather than to a guess.
+      {
+        id: "financialYear",
+        header: "FINANCIAL YEAR",
+        accessorFn: (row) => row.financialYear || "",
+        Cell: ({ row }) => row.original.financialYear || "—",
+      },
+      {
+        id: "quarter",
+        header: "QUARTER",
+        accessorFn: (row) => quarterLabel(row.quarter),
+        Cell: ({ row }) => quarterLabel(row.original.quarter) || "—",
+      },
+      {
+        id: "assignedDate",
+        header: "ASSIGNED ON",
+        // Sorted and filtered on the stamp, not on "27-07-2026" — text order
+        // puts every 01- before every 02- whatever the year.
+        accessorFn: (row) => row.assignedOn?.date || "",
+        sortingFn: (a, b) =>
+          (a.original.assignedValue ?? 0) - (b.original.assignedValue ?? 0),
+        Cell: ({ row }) => row.original.assignedOn?.date || "—",
+      },
     ],
     [manage]
   );
 
   const getExportData = () =>
-    data.map((item) => ({
+    rows.map((item) => ({
       "COURSE NO": item.no,
       "COURSE NAME": item.name,
       "COURSE CATEGORY": item.category,
       "COURSE INSTRUCTOR": item.instructor,
+      "FINANCIAL YEAR": item.financialYear || "",
+      QUARTER: quarterLabel(item.quarter),
+      "ASSIGNED ON": item.assignedOn?.date || "",
     }));
 
   const handleExportExcel = () => {
@@ -71,9 +107,15 @@ export default function ModulesGrid({
 
   const handleExportPDF = () => {
     const doc = new jsPDF();
-    const headers = columns.map((c) => c.header);
-    const rows = data.map((row) => columns.map((c) => row[c.accessorKey] || ""));
-    autoTable(doc, { head: [headers], body: rows });
+    // Driven by the export rows rather than by `columns`: the date columns are
+    // built from an accessorFn and have no accessorKey to read a value by, so
+    // reading the column list left both of them blank in every row.
+    const rows = getExportData();
+    const headers = Object.keys(rows[0] ?? {});
+    autoTable(doc, {
+      head: [headers],
+      body: rows.map((row) => headers.map((h) => row[h] ?? "")),
+    });
     doc.save("modules.pdf");
   };
 
@@ -111,7 +153,7 @@ export default function ModulesGrid({
         ) : (
           <ExoMaterialTable
             columns={columns}
-            data={data}
+            data={rows}
             enablePagination
             enableSorting
             enableColumnFilters

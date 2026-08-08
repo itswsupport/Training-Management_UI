@@ -34,6 +34,9 @@ export default function ScrollFooter() {
 
   return (
     <footer
+      // Measured by MaterialViewer, which stops short of it so the footer stays
+      // visible while a document is open.
+      id="app-footer"
       className={`
         absolute bottom-0 left-0 right-0 
         bg-white border-t border-gray-200 

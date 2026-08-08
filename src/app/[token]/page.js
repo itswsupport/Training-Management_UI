@@ -12,12 +12,17 @@ import { getDefaultDashboardForUser, isTokenLoginRoute } from "@/lib/permissions
  * The portal's dashboard encrypts the employee code it already has and sends
  * the browser here. The token goes to the backend as-is — it holds the AES key
  * and decides whether the token is good (PortalTokenService) — and what comes
- * back is a session. The password form at /Login stays for anyone reaching the
- * app directly.
+ * back is a session.
+ *
+ * There is no password form to fall back on: /Login was turned into a way out
+ * of the app, so anyone sent there is bounced straight to the portal. Both
+ * dead ends here therefore leave through `logout` — the same door — rather than
+ * routing to /Login and relying on that page's side effect to do it.
  *
  * This is the app's catch-all single-segment route, so a mistyped URL — /login
- * rather than /Login, matching being case-sensitive — lands here too. Those are
- * sent to the login form rather than reported as a token failure.
+ * rather than /Login, matching being case-sensitive — lands here too. Someone
+ * with a session is put back on their dashboard; someone without one is
+ * returned to the portal rather than told their token failed.
  */
 
 const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || "/etms";
@@ -31,7 +36,7 @@ const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || "/etms";
 const processedTokens = new Set();
 
 export default function TokenLoginPage() {
-  const { user, loading, loginWithPortalToken } = useAuth();
+  const { user, loading, loginWithPortalToken, logout } = useAuth();
   const router = useRouter();
   const params = useParams();
 
@@ -44,7 +49,11 @@ export default function TokenLoginPage() {
 
     // Not a token at all — a mistyped path that fell through to this route.
     if (!isTokenLoginRoute(`/${token}`)) {
-      router.replace(user ? getDefaultDashboardForUser(user) : "/Login");
+      if (user) {
+        router.replace(getDefaultDashboardForUser(user));
+      } else {
+        logout();
+      }
       return;
     }
 
@@ -70,7 +79,7 @@ export default function TokenLoginPage() {
     // this effect re-runs freely. That is harmless: `processedTokens` above
     // turns every run after the first into a no-op, and the redirect branch is
     // idempotent.
-  }, [token, user, loading, error, router, loginWithPortalToken]);
+  }, [token, user, loading, error, router, loginWithPortalToken, logout]);
 
   if (error) {
     return (
@@ -91,10 +100,10 @@ export default function TokenLoginPage() {
           <div className="flex justify-center">
             <button
               type="button"
-              onClick={() => router.replace("/Login")}
+              onClick={logout}
               className="rounded bg-[#3482AE] px-5 py-1.5 text-sm text-white transition-colors hover:bg-[#2a6a8f]"
             >
-              GO TO LOGIN
+              BACK TO PORTAL
             </button>
           </div>
         </div>

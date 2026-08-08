@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useImperativeHandle, useMemo, useState } from "react";
-import { Plus } from "lucide-react";
+import { Lock, Plus } from "lucide-react";
 
 import MultiSelect from "@/components/ui/common/MultiSelect";
 import SearchableSelect from "@/components/ui/common/SearchableSelect";
@@ -9,11 +9,7 @@ import { useAuth } from "@/context/AuthContext";
 import { getEmpCode } from "@/lib/permissions";
 import { alerts } from "@/lib/alerts";
 import { apiErrorMessage } from "@/config/api";
-import {
-  QUARTER_OPTIONS,
-  instructorName,
-  quarterMeta,
-} from "@/services/MasterDataService";
+import { QUARTER_OPTIONS, instructorName } from "@/services/MasterDataService";
 import { updateModuleDetails } from "@/services/ModuleService";
 
 // Same field styling as the Add Module form, so the two read as one thing.
@@ -45,7 +41,12 @@ export default function CourseDetailsEditor({ course, options, ref }) {
   const [categoryId, setCategoryId] = useState(course.categoryId);
   const [author, setAuthor] = useState(course.instructor);
   const [description, setDescription] = useState(course.description);
-  const [quarter, setQuarter] = useState(course.quarter);
+  // Read-only: the quarter is displayed but never edited, so it is derived
+  // rather than held in state. Courses raised before the quarter fields existed
+  // have none to show.
+  const quarterLabel =
+    QUARTER_OPTIONS.find((q) => q.value === String(course.quarter))?.label ??
+    (course.kraQuarter || "Not set");
   const [objectives, setObjectives] = useState(
     course.objectives.length ? course.objectives : [""]
   );
@@ -84,12 +85,14 @@ export default function CourseDetailsEditor({ course, options, ref }) {
     if (deptIds.length === 0) return reject("Please select at least one department.");
     if (gradeIds.length === 0) return reject("Please select at least one grade.");
 
-    // Only recompute the quarter window when the officer actually picked one.
-    // Older modules carry no kraQuarter and a far-future validTill; silently
-    // replacing that would shorten the course's life.
-    const quarterFields = quarter
-      ? quarterMeta(quarter)
-      : { kraQuarter: course.kraQuarter, validTill: course.validTill };
+    // Carried through untouched. The officer cannot pick a quarter here, so
+    // there is nothing to recompute — and recomputing would be the bug this
+    // guards against, since it would re-date the course's window and put it
+    // back in front of the same departments for a period already reported on.
+    const quarterFields = {
+      kraQuarter: course.kraQuarter,
+      validTill: course.validTill,
+    };
 
     try {
       await updateModuleDetails({
@@ -200,14 +203,19 @@ export default function CourseDetailsEditor({ course, options, ref }) {
           />
         </Field>
 
+        {/* Shown, not editable. Moving a course's quarter moves the window it
+            was assigned against, which is the same thing as assigning it again
+            — to the same people, for a period they have already been reported
+            on. The quarter is fixed when the course is raised; a course wanted
+            for the next quarter is a new course. */}
         <Field label="APPLICABLE QUARTER:">
-          <SearchableSelect
-            options={QUARTER_OPTIONS}
-            value={quarter}
-            onChange={setQuarter}
-            placeholder="- Unchanged -"
-            searchPlaceholder="Search quarter…"
-          />
+          <div
+            title="A course's quarter is fixed when it is created and cannot be changed here."
+            className={`${inputCls} flex cursor-not-allowed items-center justify-between gap-2 bg-gray-100 text-gray-600`}
+          >
+            <span>{quarterLabel}</span>
+            <Lock className="h-3.5 w-3.5 shrink-0 text-gray-400" />
+          </div>
         </Field>
 
         <div className="md:col-span-2">

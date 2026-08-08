@@ -6,7 +6,14 @@
  */
 
 import { api, sendForm, unwrap, getApiUrl } from "@/config/api";
-import { clean, cleanOrNull, nowStamp } from "@/utils/etmsFormat";
+import { financialYearOf, quarterOf } from "@/services/MasterDataService";
+import {
+  clean,
+  cleanOrNull,
+  displayStamp,
+  nowStamp,
+  stampValue,
+} from "@/utils/etmsFormat";
 
 /**
  * @typedef {object} ModuleRow
@@ -28,14 +35,37 @@ const toModuleRow = (m) => ({
   instructor: clean(m.emoduleAuthor),
   description: clean(m.emoduleLongDesc),
   status: m.status ?? 0,
+  // The module's own registration stamp — the only date it carries. Nothing
+  // records when a module was put in front of its departments: assignment
+  // writes a row per employee and stamps none of them, and the module itself
+  // gains no second date when it is submitted. The wizard creates and submits
+  // in one run, so for every module raised through it this is that moment.
+  assignedOn: displayStamp(m.regDate, m.regTime),
+  assignedValue: stampValue(m.regDate, m.regTime),
+  // What the officer's year / quarter filters read. Both are derived from the
+  // one stored string; neither is a column on the grid.
+  kraQuarter: clean(m.kraQuarter),
+  quarter: quarterOf(m.kraQuarter),
+  financialYear: financialYearOf(m.kraQuarter),
 });
 
 /**
- * All e-modules, newest first.
+ * All e-modules, newest first — or one financial year and / or quarter of them.
+ *
+ * The filter is the backend's to apply, not the grid's: the officer's list is
+ * the whole table, and narrowing it here would mean fetching every module to
+ * show a dozen. Both halves are optional and independent, and an empty one is
+ * left off the request rather than sent blank.
+ *
+ * @param {{financialYear?: string, quarter?: string}} [filter]
  * @returns {Promise<ModuleRow[]>}
  */
-export async function getModules() {
-  const list = unwrap(await api.get("/emodule/list"), []) ?? [];
+export async function getModules(filter = {}) {
+  const params = {};
+  if (filter.financialYear) params.financialYear = filter.financialYear;
+  if (filter.quarter) params.quarter = filter.quarter;
+
+  const list = unwrap(await api.get("/emodule/list", { params }), []) ?? [];
   return list.map(toModuleRow).sort((a, b) => b.id - a.id);
 }
 
@@ -46,11 +76,6 @@ const parseIdList = (value) =>
     .map((s) => s.trim())
     .filter(Boolean);
 
-/** "1 [ 2024-04-01 to 2024-06-30 ]" → "1"; anything else → "". */
-const parseQuarter = (kraQuarter) => {
-  const match = String(kraQuarter ?? "").trim().match(/^([1-4])\b/);
-  return match ? match[1] : "";
-};
 
 /**
  * One course with its sections, lectures and learning objectives.
@@ -78,7 +103,7 @@ export async function getCourseDetail(emoduleId) {
     categoryId: e.categoryId != null ? String(e.categoryId) : "",
     deptIds: parseIdList(e.deptId),
     gradeIds: parseIdList(e.gradeId),
-    quarter: parseQuarter(e.kraQuarter),
+    quarter: quarterOf(e.kraQuarter),
     // Carried through an update untouched, so editing never rewrites who
     // created the module or when.
     status: e.status ?? 1,

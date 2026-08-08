@@ -70,9 +70,9 @@ function ReadBadge({ done, label }) {
  * one only ever produced a download, so the material never appeared on screen
  * at all.
  *
- * It fills the content area rather than the window, so the sidebar and the
- * header stay where they are and stay usable — the learner is still visibly
- * inside ETMS, one click from the rest of it.
+ * It fills the content area rather than the window, so the sidebar, the header
+ * and the footer stay where they are and stay usable — the learner is still
+ * visibly inside ETMS, one click from the rest of it.
  *
  * @param {object} props
  * @param {"pdf"|"sheet"|"image"} props.kind how the body is rendered
@@ -182,12 +182,18 @@ export default function MaterialViewer({
 }
 
 /**
- * The box the panel fills: the page's content area, leaving the sidebar and the
- * header on screen.
+ * The box the panel fills: the page's content area, leaving the sidebar, the
+ * header and the footer on screen.
  *
  * Measured rather than assumed — the sidebar slides open and shut, and the
  * header's height follows its own content. Null until it can be read, and for a
  * screen with no shell around it at all, which falls back to the whole window.
+ *
+ * The footer is subtracted rather than left underneath. It is positioned over
+ * the bottom of the same column, so the content area's own height runs behind
+ * it and a panel given all of that would cover it. `offsetHeight`, not the
+ * bounding rect: the footer slides out of the way on scroll, and a transformed
+ * rect would report it as gone and hand the panel the space back.
  */
 function useContentBox() {
   const [box, setBox] = useState(null);
@@ -198,11 +204,12 @@ function useContentBox() {
 
     const measure = () => {
       const rect = main.getBoundingClientRect();
+      const footer = document.getElementById("app-footer");
       setBox({
         top: rect.top,
         left: rect.left,
         width: rect.width,
-        height: rect.height,
+        height: Math.max(0, rect.height - (footer?.offsetHeight ?? 0)),
       });
     };
     measure();
@@ -210,6 +217,8 @@ function useContentBox() {
     // Collapsing the sidebar resizes the content area under the panel.
     const observer = new ResizeObserver(measure);
     observer.observe(main);
+    const footer = document.getElementById("app-footer");
+    if (footer) observer.observe(footer);
     window.addEventListener("resize", measure);
 
     return () => {

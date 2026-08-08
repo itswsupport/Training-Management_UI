@@ -12,6 +12,7 @@ import ExportActions from "@/components/ui/common/ExportActions";
 import { alerts } from "@/lib/alerts";
 import { downloadCertificate } from "@/lib/certificate";
 import { encodeId } from "@/lib/courseId";
+import { quarterLabel } from "@/services/MasterDataService";
 
 const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || "/etms";
 
@@ -46,6 +47,9 @@ export default function CompletedCoursesGrid({
   // artwork loads.
   const [downloading, setDownloading] = React.useState(null);
 
+  // Already filtered by the backend — see ModulesGrid.
+  const rows = data;
+
   const handleDownload = React.useCallback(async (row) => {
     setDownloading(row.id);
     try {
@@ -75,7 +79,33 @@ export default function CompletedCoursesGrid({
       { accessorKey: "name", header: "COURSE NAME" },
       { accessorKey: "category", header: "COURSE CATEGORY" },
       { accessorKey: "instructor", header: "COURSE INSTRUCTOR" },
+      // The pair the filter bar above works on, the same two ModulesGrid shows
+      // on the other three tabs — a learner switching tabs sees one table, not
+      // two shapes of one. Courses raised before the quarter field exists carry
+      // none, hence the dash rather than a guess.
+      {
+        id: "financialYear",
+        header: "FINANCIAL YEAR",
+        accessorFn: (row) => row.financialYear || "",
+        Cell: ({ row }) => row.original.financialYear || "—",
+      },
+      {
+        id: "quarter",
+        header: "QUARTER",
+        accessorFn: (row) => quarterLabel(row.quarter),
+        Cell: ({ row }) => quarterLabel(row.original.quarter) || "—",
+      },
       { accessorKey: "grade", header: "GRADE" },
+      {
+        id: "completedDate",
+        header: "COMPLETED ON",
+        accessorFn: (row) => row.completedOn?.date || "",
+        // Sorted on the stamp, not on "27-07-2026" — text order puts every
+        // 01- before every 02- whatever the year.
+        sortingFn: (a, b) =>
+          (a.original.completedValue ?? 0) - (b.original.completedValue ?? 0),
+        Cell: ({ row }) => row.original.completedOn?.date || "—",
+      },
       {
         accessorKey: "certificate",
         header: "CERTIFICATE",
@@ -112,12 +142,15 @@ export default function CompletedCoursesGrid({
   );
 
   const getExportData = () =>
-    data.map((item) => ({
+    rows.map((item) => ({
       "COURSE NO": item.no,
       "COURSE NAME": item.name,
       "COURSE CATEGORY": item.category,
       "COURSE INSTRUCTOR": item.instructor,
+      "FINANCIAL YEAR": item.financialYear || "",
+      QUARTER: quarterLabel(item.quarter),
       GRADE: item.grade,
+      "COMPLETED ON": item.completedOn?.date || "",
     }));
 
   const handleExportExcel = () => {
@@ -129,10 +162,16 @@ export default function CompletedCoursesGrid({
 
   const handleExportPDF = () => {
     const doc = new jsPDF();
-    const exportCols = columns.filter((c) => c.accessorKey !== "certificate");
-    const headers = exportCols.map((c) => c.header);
-    const rows = data.map((row) => exportCols.map((c) => row[c.accessorKey] || ""));
-    autoTable(doc, { head: [headers], body: rows });
+    // Driven by the export rows rather than by `columns`: the date columns are
+    // built from an accessorFn and have no accessorKey to read a value by, so
+    // reading the column list left both of them blank in every row. It also
+    // drops the certificate column, which the old filter had to do by hand.
+    const rows = getExportData();
+    const headers = Object.keys(rows[0] ?? {});
+    autoTable(doc, {
+      head: [headers],
+      body: rows.map((row) => headers.map((h) => row[h] ?? "")),
+    });
     doc.save("completed-courses.pdf");
   };
 
@@ -167,7 +206,7 @@ export default function CompletedCoursesGrid({
         ) : (
           <ExoMaterialTable
             columns={columns}
-            data={data}
+            data={rows}
             enablePagination
             enableSorting
             enableColumnFilters

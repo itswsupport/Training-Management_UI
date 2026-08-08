@@ -36,30 +36,132 @@ export const QUARTER_OPTIONS = [
   { value: "4", label: "4 (Jan - Mar)" },
 ];
 
-/** Builds the kraQuarter label and validTill date the backend stores. */
-export function quarterMeta(quarter, year = new Date().getFullYear()) {
+/**
+ * The financial year a date falls in, named by the calendar year it starts in.
+ *
+ * April to March, the same boundary currentQuarter() above already assumes, so
+ * March 2026 belongs to the year that began in April 2025 and is called 2025.
+ */
+export function currentFinancialYear(date = new Date()) {
+  const year = date.getFullYear();
+  return date.getMonth() + 1 >= 4 ? year : year - 1;
+}
+
+/** "2025-26" for the year starting April 2025. */
+export const financialYearLabel = (startYear) =>
+  `${startYear}-${String((Number(startYear) + 1) % 100).padStart(2, "0")}`;
+
+/**
+ * The financial year dropdown: last year, this one, and the two ahead.
+ *
+ * A course is usually raised for the year in progress or the one about to
+ * start; the year behind is kept because a module added in April for the
+ * quarter that just closed is a real thing officers do.
+ */
+export function financialYearOptions(startYear = currentFinancialYear()) {
+  const first = Number(startYear) - 1;
+  return Array.from({ length: 4 }, (_, i) => {
+    const year = first + i;
+    return { value: String(year), label: financialYearLabel(year) };
+  });
+}
+
+/**
+ * Builds the kraQuarter label and validTill date the backend stores.
+ *
+ * `financialYear` is the year the April-to-March span starts in, which is not
+ * the calendar year the quarter falls in for Q4: quarter 4 of 2025-26 runs
+ * January to March 2026. This used to take a calendar year defaulting to the
+ * current one, so a Q4 course raised any time before January was stamped with
+ * the January just gone — a validTill in the past, expiring the course the
+ * moment it was created.
+ */
+export function quarterMeta(quarter, financialYear = currentFinancialYear()) {
+  const parsed = Number(financialYear);
+  const start = Number.isFinite(parsed) ? parsed : currentFinancialYear();
+
   switch (String(quarter)) {
     case "1":
       return {
-        kraQuarter: `1 [ ${year}-04-01 to ${year}-06-30 ]`,
-        validTill: `${year}-06-30`,
+        kraQuarter: `1 [ ${start}-04-01 to ${start}-06-30 ]`,
+        validTill: `${start}-06-30`,
       };
     case "2":
       return {
-        kraQuarter: `2 [ ${year}-07-01 to ${year}-09-30 ]`,
-        validTill: `${year}-09-30`,
+        kraQuarter: `2 [ ${start}-07-01 to ${start}-09-30 ]`,
+        validTill: `${start}-09-30`,
       };
     case "3":
       return {
-        kraQuarter: `3 [ ${year}-10-01 to ${year}-12-31 ]`,
-        validTill: `${year}-12-31`,
+        kraQuarter: `3 [ ${start}-10-01 to ${start}-12-31 ]`,
+        validTill: `${start}-12-31`,
       };
-    default:
+    default: {
+      // Q4 is January to March, which lands in the calendar year after the one
+      // the financial year is named for.
+      const end = start + 1;
       return {
-        kraQuarter: `4 [ ${year}-01-01 to ${year}-03-31 ]`,
-        validTill: `${year}-03-31`,
+        kraQuarter: `4 [ ${end}-01-01 to ${end}-03-31 ]`,
+        validTill: `${end}-03-31`,
       };
+    }
   }
+}
+
+/** "2" → "2 (Jul - Sep)", for a column showing what a stored quarter means. */
+export const quarterLabel = (quarter) =>
+  QUARTER_OPTIONS.find((option) => option.value === String(quarter))?.label ??
+  "";
+
+/** "1 [ 2024-04-01 to 2024-06-30 ]" → "1"; anything else → "". */
+export const quarterOf = (kraQuarter) => {
+  const match = String(kraQuarter ?? "").trim().match(/^([1-4])\b/);
+  return match ? match[1] : "";
+};
+
+/**
+ * The financial year a stored quarter belongs to, as the calendar year it
+ * starts in — "1 [ 2026-04-01 to … ]" and "4 [ 2027-01-01 to … ]" are both
+ * 2026, because the year runs April to March.
+ *
+ * Read from the span's own first date rather than from the quarter number, so
+ * a row whose number and dates disagree is filed under the dates it actually
+ * covers. Empty for the older courses that carry no quarter at all — most of
+ * them, so anything filtering on this needs a way to ask for everything.
+ */
+export const financialYearOf = (kraQuarter) => {
+  const match = String(kraQuarter ?? "").match(/(\d{4})-(\d{2})-\d{2}/);
+  if (!match) return "";
+  const year = Number(match[1]);
+  return String(Number(match[2]) >= 4 ? year : year - 1);
+};
+
+/**
+ * Whether a course's quarter has closed.
+ *
+ * `validTill` is the last day the quarter covers, so the course is still
+ * current for the whole of that day — this compares dates, not instants, or a
+ * course would lock at midnight-plus-one-second on its final morning.
+ *
+ * Anything unparseable answers false. Modules created before the quarter fields
+ * existed carry no usable date, and a module nobody dated must stay editable
+ * rather than be locked out by a value that was never set.
+ *
+ * @param {string} validTill the stored YYYY-MM-DD date
+ */
+export function isQuarterClosed(validTill, today = new Date()) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(validTill ?? "").trim());
+  if (!match) return false;
+
+  const end = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  if (Number.isNaN(end.getTime())) return false;
+
+  const startOfToday = new Date(
+    today.getFullYear(),
+    today.getMonth(),
+    today.getDate()
+  );
+  return startOfToday > end;
 }
 
 /**
@@ -70,7 +172,8 @@ export function quarterMeta(quarter, year = new Date().getFullYear()) {
  *   instructors: {name: string, code: string, label: string}[],
  *   departments: {id: number, name: string}[],
  *   grades: {id: number, label: string}[],
- *   defaultQuarter: string
+ *   defaultQuarter: string,
+ *   defaultFinancialYear: string
  * }>}
  */
 /**
@@ -134,5 +237,6 @@ export async function getModuleFormOptions() {
           : `${clean(g.grade)} [ ${clean(g.designation)} ]`,
     })),
     defaultQuarter: currentQuarter(),
+    defaultFinancialYear: String(currentFinancialYear()),
   };
 }

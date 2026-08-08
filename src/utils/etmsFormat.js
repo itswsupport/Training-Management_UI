@@ -54,6 +54,38 @@ export function stampValue(date, time) {
   return Date.UTC(y, m - 1, d, hour, Number(minute));
 }
 
+/**
+ * A stored `yyyy-MM-dd` + `hh:mm AM/PM` pair as the two strings a grid shows:
+ * `{date: "27-07-2026", time: "04:35 PM"}`.
+ *
+ * Both halves are the backend's own local strings, so nothing is converted —
+ * reading them as an instant is what would drag a timezone in and shift every
+ * stamp by 5:30. A half that cannot be read comes back empty, so a column says
+ * nothing rather than something wrong.
+ */
+export function displayStamp(date, time) {
+  const [y, m, d] = String(date ?? "")
+    .trim()
+    .split("-");
+
+  const match = String(time ?? "")
+    .trim()
+    .match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*([AaPp][Mm])?$/);
+
+  let shown = "";
+  if (match) {
+    const [, rawHour, minute, meridiem] = match;
+    let hour = Number(rawHour);
+    if (meridiem) {
+      hour %= 12;
+      if (/p/i.test(meridiem)) hour += 12;
+    }
+    shown = `${pad(hour % 12 || 12)}:${minute} ${hour >= 12 ? "PM" : "AM"}`;
+  }
+
+  return { date: y && m && d ? `${d}-${m}-${y}` : "", time: shown };
+}
+
 /** Trims a backend string, mapping null / "null" / "-" to "". */
 export const clean = (value) => {
   const text = String(value ?? "").trim();

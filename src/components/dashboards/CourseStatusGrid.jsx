@@ -9,8 +9,28 @@ import autoTable from "jspdf-autotable";
 
 import ExoMaterialTable from "@/components/ui/common/ExoMaterialTable";
 import ExportActions from "@/components/ui/common/ExportActions";
+import FeedbackResponseDialog from "@/components/dashboards/FeedbackResponseDialog";
 import { encodeId } from "@/lib/courseId";
 import { getCourseStatusConfig } from "@/lib/statusConfig";
+
+/**
+ * The status filter's own values, not the backend's.
+ *
+ * A row's status is 2 completed, 3 overdue, anything else pending — the same
+ * rule getCourseStatusConfig reads. "Pending" here therefore covers overdue
+ * too: both mean the employee has not finished, which is the distinction an
+ * officer chasing completions is making.
+ */
+export const STATUS_ALL = "all";
+const STATUS_COMPLETED = "completed";
+const STATUS_PENDING = "pending";
+
+/** Exported so the page can render the control on the line above the grid. */
+export const STATUS_CHOICES = [
+  { value: STATUS_ALL, label: "All" },
+  { value: STATUS_COMPLETED, label: "Completed" },
+  { value: STATUS_PENDING, label: "Pending" },
+];
 
 export default function CourseStatusGrid({
   data = [],
@@ -19,7 +39,25 @@ export default function CourseStatusGrid({
   onRetry,
   title = "COURSE STATUS",
   headerColor = "#20c997",
+  // The status the officer is chasing. Year and quarter are not props: those
+  // two go to the backend with the request, so `data` already carries only the
+  // quarter that was asked for. Status stays here — it is one field on a row
+  // already in hand, and a round trip to hide two thirds of it would be slower
+  // than the click that asked for it.
+  status = STATUS_ALL,
 }) {
+  // The row whose feedback is open, or null. Held on the grid rather than in
+  // the column definition so the panel survives the table re-rendering.
+  const [viewing, setViewing] = React.useState(null);
+
+  // What the table, the empty state and every export all read, so a filtered
+  // screen and a filtered export can never disagree.
+  const rows = React.useMemo(() => {
+    if (status === STATUS_ALL) return data;
+    const wantCompleted = status === STATUS_COMPLETED;
+    return data.filter((row) => (row.status === 2) === wantCompleted);
+  }, [data, status]);
+
   const columns = React.useMemo(
     () => [
       {
@@ -42,6 +80,10 @@ export default function CourseStatusGrid({
       { accessorKey: "empName", header: "EMPLOYEE NAME" },
       { accessorKey: "designation", header: "DESIGNATION" },
       { accessorKey: "course", header: "COURSE" },
+      // KRA QUARTER already spells out the year and quarter with their dates,
+      // so this screen shows that one column rather than the same value three
+      // ways. The filter bar above still works on the year and quarter behind
+      // it — the row carries them whether or not a column shows them.
       { accessorKey: "kraQuarter", header: "KRA QUARTER" },
       { accessorKey: "grade", header: "GRADE" },
       {
@@ -49,13 +91,19 @@ export default function CourseStatusGrid({
         header: "FEEDBACK",
         enableColumnFilter: false,
         enableSorting: false,
+        // Opens what the employee actually submitted, not the blank form. This
+        // used to link to /course/<id>/feedback, which is the learner's own
+        // form for their own course — an officer following it either got the
+        // access guard or, on a course of their own, an empty form to fill in.
         Cell: ({ row }) =>
           row.original.moduleId ? (
-            <Link href={`/course/${encodeId(row.original.moduleId)}/feedback`}>
-              <span className="bg-[#20c997] text-white px-2 py-1 rounded text-xs font-semibold cursor-pointer">
-                VIEW
-              </span>
-            </Link>
+            <button
+              type="button"
+              onClick={() => setViewing(row.original)}
+              className="cursor-pointer rounded bg-[#20c997] px-2 py-1 text-xs font-semibold text-white transition hover:bg-[#1aa179]"
+            >
+              VIEW
+            </button>
           ) : (
             <Box sx={{ fontFamily: "Exo", fontSize: "12px", color: "#6b7280" }}>-</Box>
           ),
@@ -86,7 +134,7 @@ export default function CourseStatusGrid({
   );
 
   const getExportData = () =>
-    data.map((item) => ({
+    rows.map((item) => ({
       "COURSE NO": item.no,
       "EMPLOYEE CODE": item.empCode,
       "EMPLOYEE NAME": item.empName,
@@ -145,7 +193,7 @@ export default function CourseStatusGrid({
         ) : (
           <ExoMaterialTable
             columns={columns}
-            data={data}
+            data={rows}
             enablePagination
             enableSorting
             enableColumnFilters
@@ -173,6 +221,13 @@ export default function CourseStatusGrid({
           />
         )}
       </div>
+
+      {viewing ? (
+        <FeedbackResponseDialog
+          row={viewing}
+          onClose={() => setViewing(null)}
+        />
+      ) : null}
     </div>
   );
 }

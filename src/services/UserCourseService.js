@@ -5,8 +5,12 @@
  */
 
 import { api, unwrap } from "@/config/api";
-import { getLatestContentChange } from "@/services/TransactionService";
-import { clean, fullName, stampValue } from "@/utils/etmsFormat";
+import { financialYearOf, quarterOf } from "@/services/MasterDataService";
+import {
+  getLatestContentChange,
+  getTransactions,
+} from "@/services/TransactionService";
+import { clean, displayStamp, fullName, stampValue } from "@/utils/etmsFormat";
 
 export const COURSE_STATUS = {
   PENDING: 0,
@@ -21,14 +25,16 @@ export const COURSE_STATUS = {
  * @returns {Promise<Array>} rows in the shared ModuleRow shape, plus the
  *   grade / registration date / employee name the Completed view needs.
  */
-export async function getUserCourses(empCode, status) {
+export async function getUserCourses(empCode, status, filter = {}) {
+  const params = { empName: empCode, status };
+  // Narrowed by the backend when the dashboard asks for a quarter. Deliberately
+  // NOT passed by getAssignedStatus below: that asks "is this course theirs at
+  // all", and a filtered answer would refuse a course the learner really has.
+  if (filter.financialYear) params.financialYear = filter.financialYear;
+  if (filter.quarter) params.quarter = filter.quarter;
+
   const list =
-    unwrap(
-      await api.get("/user_module/by_status", {
-        params: { empName: empCode, status },
-      }),
-      []
-    ) ?? [];
+    unwrap(await api.get("/user_module/by_status", { params }), []) ?? [];
 
   return list.map((row, index) => {
     const e = row.trainingEmodule ?? {};
@@ -44,7 +50,85 @@ export async function getUserCourses(empCode, status) {
       grade: clean(row.grade) || "-",
       regDate: clean(row.regDate),
       regTime: clean(row.regTime),
+      // The row carries one stamp, rewritten each time the learner's status
+      // moves — so on a completed row it is when they finished. It is empty on
+      // a pending row: nothing writes it at assignment (see assignedStamps).
+      completedOn: displayStamp(row.regDate, row.regTime),
+      completedValue: stampValue(row.regDate, row.regTime),
+      // The course's own quarter, carried for the dashboard's year / quarter
+      // filters. Read off the module rather than the learner's row — the
+      // learner has no quarter, the course they were given does.
+      kraQuarter: clean(e.kraQuarter),
+      quarter: quarterOf(e.kraQuarter),
+      financialYear: financialYearOf(e.kraQuarter),
       empName: fullName(u.employeeFname, u.employeeLname),
+    };
+  });
+}
+
+/**
+ * When each of this employee's courses was assigned to them, by module id.
+ *
+ * The learner's own row cannot answer this. `TrainingEmoduleEmp` holds a single
+ * reg_date/reg_time pair which is left unset at assignment and then overwritten
+ * every time the learner's status moves, so by the time a course is completed
+ * the only stamp on it is the completion. The history log is the one place the
+ * assignment itself was recorded — one MODULE_ASSIGNED row per employee per
+ * course, written as the module is submitted.
+ *
+ * One request for the whole dashboard rather than one per course. Newest first
+ * and capped at 500 by the backend, so where a course was somehow assigned
+ * twice the first hit seen is the most recent, and a learner past 500 history
+ * rows loses the oldest — both leave the column empty rather than wrong.
+ *
+ * @param {string} empCode
+ * @returns {Promise<Map<string, {date: string, time: string}>>}
+ */
+export async function getAssignedStamps(empCode) {
+  const byModule = new Map();
+  if (!empCode) return byModule;
+
+  const rows = await getTransactions({
+    empCode,
+    action: "MODULE_ASSIGNED",
+  });
+
+  for (const row of rows) {
+    if (row.emoduleId == null) continue;
+    const key = String(row.emoduleId);
+    if (byModule.has(key)) continue;
+    byModule.set(key, {
+      date: row.whenDate,
+      time: row.whenTime,
+      value: stampValue(row.atDate, row.atTime),
+    });
+  }
+  return byModule;
+}
+
+/**
+ * The learner's courses for one status, each carrying when it was assigned.
+ *
+ * The two reads are independent, so they go together — and a history the
+ * backend refuses must not cost the learner their course list, so it degrades
+ * to no assignment dates rather than an error.
+ *
+ * @param {string} empCode
+ * @param {number} status one of COURSE_STATUS
+ * @param {{financialYear?: string, quarter?: string}} [filter]
+ */
+export async function getUserCoursesWithStamps(empCode, status, filter = {}) {
+  const [courses, assigned] = await Promise.all([
+    getUserCourses(empCode, status, filter),
+    getAssignedStamps(empCode).catch(() => new Map()),
+  ]);
+
+  return courses.map((course) => {
+    const stamp = assigned.get(String(course.id));
+    return {
+      ...course,
+      assignedOn: { date: stamp?.date ?? "", time: stamp?.time ?? "" },
+      assignedValue: stamp?.value ?? null,
     };
   });
 }
