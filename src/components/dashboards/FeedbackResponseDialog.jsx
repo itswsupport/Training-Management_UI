@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Check, X } from "lucide-react";
 
 import { apiErrorMessage } from "@/config/api";
 import { getSubmittedFeedback } from "@/services/FeedbackService";
@@ -25,6 +25,7 @@ import { getSubmittedFeedback } from "@/services/FeedbackService";
  */
 export default function FeedbackResponseDialog({ row, onClose }) {
   const [state, setState] = useState({ status: "loading" });
+  const panelRef = useRef(null);
 
   useEffect(() => {
     const onKey = (event) => {
@@ -33,6 +34,26 @@ export default function FeedbackResponseDialog({ row, onClose }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  /**
+   * The panel takes the keyboard while it is open and hands it back on close.
+   *
+   * Without this, focus is still on the VIEW button behind the backdrop, so Tab
+   * walks the grid underneath the panel and a screen reader reads the table
+   * rather than the feedback. The page is frozen too: a modal that scrolls the
+   * list behind it loses the officer the row they opened.
+   */
+  useEffect(() => {
+    const previous = document.activeElement;
+    const { overflow } = document.body.style;
+    document.body.style.overflow = "hidden";
+    panelRef.current?.focus();
+
+    return () => {
+      document.body.style.overflow = overflow;
+      if (previous instanceof HTMLElement) previous.focus();
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -64,17 +85,20 @@ export default function FeedbackResponseDialog({ row, onClose }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-[2px]"
       // A click on the backdrop closes; one inside the card must not, so the
       // panel below stops the event rather than the backdrop testing its target.
       onClick={onClose}
     >
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label="Submitted feedback"
+        tabIndex={-1}
         onClick={(event) => event.stopPropagation()}
-        className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded bg-white shadow-xl"
+        // The same entrance every other panel in the app uses.
+        className="animate-fadeInUp flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-md bg-white shadow-2xl outline-none"
       >
         <div className="flex shrink-0 items-start gap-3 bg-[#20c997] px-4 py-3">
           <div className="min-w-0 flex-1">
@@ -112,9 +136,12 @@ export default function FeedbackResponseDialog({ row, onClose }) {
               This employee has not submitted the feedback form for this course.
             </p>
           ) : (
-            <ol className="space-y-4">
+            // Ruled between questions rather than only spaced: on a form of a
+            // dozen, a wrapped question and the scale under the one above it
+            // otherwise run together.
+            <ol className="divide-y divide-gray-100">
               {feedback.answers.map((entry, index) => (
-                <li key={entry.id}>
+                <li key={entry.id} className="py-3 first:pt-0 last:pb-0">
                   <p className="mb-2 text-[12px] font-semibold text-gray-800 normal-case">
                     {index + 1}. {entry.question}
                   </p>
@@ -130,12 +157,15 @@ export default function FeedbackResponseDialog({ row, onClose }) {
                         return (
                           <span
                             key={option}
-                            className={`rounded px-2 py-1 text-[11px] normal-case ${
+                            className={`inline-flex items-center gap-1 rounded border px-2 py-1 text-[11px] normal-case ${
                               chosen
-                                ? "bg-[#20c997] font-semibold text-white"
-                                : "bg-gray-100 text-gray-500"
+                                ? "border-[#20c997] bg-[#20c997] font-semibold text-white shadow-sm"
+                                : "border-gray-200 bg-gray-50 text-gray-500"
                             }`}
                           >
+                            {chosen ? (
+                              <Check className="h-3 w-3 shrink-0" />
+                            ) : null}
                             {option}
                           </span>
                         );
@@ -146,6 +176,23 @@ export default function FeedbackResponseDialog({ row, onClose }) {
               ))}
             </ol>
           )}
+        </div>
+
+        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-gray-200 bg-gray-50 px-4 py-2.5">
+          <p className="truncate text-[11px] text-gray-500 normal-case">
+            {feedback
+              ? `${feedback.answers.length} question${
+                  feedback.answers.length === 1 ? "" : "s"
+                }`
+              : ""}
+          </p>
+          <button
+            type="button"
+            onClick={onClose}
+            className="shrink-0 cursor-pointer rounded bg-white px-4 py-1.5 text-[11px] font-bold tracking-wide text-gray-700 uppercase ring-1 ring-gray-300 transition hover:bg-gray-100"
+          >
+            Close
+          </button>
         </div>
       </div>
     </div>
