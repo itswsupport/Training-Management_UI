@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { ChevronDown, Plus, X } from "lucide-react";
+import { ChevronDown, Plus, Trash2, X } from "lucide-react";
 
 import MultiSelect from "@/components/ui/common/MultiSelect";
 import SearchableSelect from "@/components/ui/common/SearchableSelect";
@@ -86,8 +86,35 @@ const subLabelCls =
   "mb-1 block text-[11px] font-semibold tracking-wide text-gray-600 uppercase";
 const fileInputCls =
   "w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-[12px] text-gray-500 file:mr-2 file:cursor-pointer file:rounded file:border-0 file:bg-[#3482AE] file:px-2.5 file:py-1 file:text-[12px] file:font-semibold file:text-white hover:file:bg-[#2a6a8f]";
-const addMoreCls =
-  "inline-flex cursor-pointer items-center gap-2 rounded border border-dashed border-[#3482AE]/60 bg-[#eaf3f9]/60 px-4 py-2 text-[12px] font-semibold tracking-wide text-[#3482AE] uppercase transition hover:bg-[#eaf3f9]";
+/**
+ * The three "add" actions, as real buttons rather than dashed outlines. A
+ * dashed box reads as an empty slot waiting to be filled — which is what the
+ * empty-state panel under the section list already is, so the button beside it
+ * was saying the same thing twice and neither looked clickable.
+ *
+ * They are deliberately not identical. Add Section builds the course, Add
+ * Lecture builds a section and Add Question builds a lecture, so each step down
+ * that order drops a level of weight — and Add Section is white because it
+ * rides in the solid brand header of the card it adds to, where a brand-filled
+ * button would disappear.
+ */
+const addBtnBase =
+  "inline-flex cursor-pointer items-center gap-1.5 rounded-md font-bold tracking-wide uppercase transition-colors active:translate-y-px focus-visible:outline-2 focus-visible:outline-offset-2";
+const addSectionCls = `${addBtnBase} shrink-0 bg-white px-3.5 py-1.5 text-[11.5px] text-[#2a6a8f] shadow-sm hover:bg-white/90 focus-visible:outline-white`;
+const addLectureCls = `${addBtnBase} border border-[#3482AE] bg-white px-3.5 py-1.5 text-[11.5px] text-[#3482AE] hover:bg-[#eaf3f9] focus-visible:outline-[#3482AE]`;
+const addQuestionCls = `${addBtnBase} bg-[#20c997] px-3 py-1.5 text-[11px] text-white shadow-sm hover:bg-[#1aa179] focus-visible:outline-[#20c997]`;
+
+/**
+ * Remove, on a lecture or a question.
+ *
+ * Outlined rather than solid: it sits in the same heading row as the block's
+ * own number, and a filled red button there pulls the eye before the thing it
+ * would delete. It fills on hover, so the weight arrives at the point the
+ * pointer is actually over it — and the label stays a word, not a bare ×, since
+ * this removes a written lecture rather than clearing a field.
+ */
+const removeBtnCls =
+  "inline-flex cursor-pointer items-center gap-1 rounded-md border border-[#dc3545]/40 bg-white px-2.5 py-1 text-[11px] font-bold tracking-wide text-[#dc3545] uppercase transition-colors active:translate-y-px hover:bg-[#dc3545] hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#dc3545]";
 // payroll's form action pair: a teal Apply and a red Cancel.
 const SUBMIT_BTN =
   "px-6 py-2 bg-[#3482AE] text-white text-sm font-semibold rounded shadow hover:bg-[#2a6a8f] transition-colors cursor-pointer disabled:opacity-60";
@@ -132,10 +159,14 @@ function Field({ label, children }) {
 /**
  * payroll's card header bar (`bg-[COLOR] px-4 py-2` + white bold uppercase h2).
  */
-function SectionHeader({ title, headerColor = "#3482AE" }) {
+function SectionHeader({ title, headerColor = "#3482AE", action = null }) {
   return (
-    <div className="px-4 py-2" style={{ backgroundColor: headerColor }}>
+    <div
+      className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 py-2"
+      style={{ backgroundColor: headerColor }}
+    >
       <h2 className="text-white font-bold uppercase tracking-wide">{title}</h2>
+      {action}
     </div>
   );
 }
@@ -254,9 +285,10 @@ function SectionFields({ section, onChange, idPrefix }) {
                     onClick={() =>
                       onChange({ lectures: lectures.filter((_, j) => j !== i) })
                     }
-                    className="rounded px-2 py-1 text-[12px] font-semibold tracking-wide text-[#dc3545] uppercase transition hover:bg-[#dc3545]/10"
+                    className={removeBtnCls}
+                    aria-label={`Remove lecture ${i + 1}`}
                   >
-                    Remove
+                    <Trash2 className="h-3 w-3" /> Remove
                   </button>
                 ) : null}
               </div>
@@ -356,7 +388,7 @@ function SectionFields({ section, onChange, idPrefix }) {
                       ],
                     })
                   }
-                  className={`mt-3 ${addMoreCls} border-[#20c997]/60 bg-[#20c997]/10 text-[#0f7a5c] hover:bg-[#20c997]/20`}
+                  className={`mt-3 ${addQuestionCls}`}
                 >
                   <Plus className="h-3.5 w-3.5" /> Add Question
                 </button>
@@ -368,7 +400,7 @@ function SectionFields({ section, onChange, idPrefix }) {
         <button
           type="button"
           onClick={() => onChange({ lectures: [...lectures, emptyLecture()] })}
-          className={`mt-3 ${addMoreCls}`}
+          className={`mt-3 ${addLectureCls}`}
         >
           <Plus className="h-3.5 w-3.5" /> Add Lecture
         </button>
@@ -401,9 +433,10 @@ function SectionFields({ section, onChange, idPrefix }) {
                   onClick={() =>
                     onChange({ questions: questions.filter((_, j) => j !== qi) })
                   }
-                  className="rounded px-2 py-1 text-[12px] font-semibold tracking-wide text-[#dc3545] uppercase transition hover:bg-[#dc3545]/10"
+                  className={removeBtnCls}
+                  aria-label={`Remove question ${qi + 1}`}
                 >
-                  Remove
+                  <Trash2 className="h-3 w-3" /> Remove
                 </button>
               </div>
 
@@ -564,7 +597,13 @@ function SectionModal({ onClose, onAdd }) {
       role="dialog"
       aria-modal="true"
     >
-      <div className="bg-white rounded shadow border border-gray-200 overflow-hidden text-[12px] flex h-[92vh] max-h-[92vh] w-full max-w-4xl flex-col">
+      {/* Height is capped against the padded backdrop rather than set to a
+          share of the viewport. `h-[92vh]` plus the backdrop's own p-4 came to
+          more than the screen, and a centred panel spills that excess equally
+          top and bottom — so ADD SECTION and CLOSE sat below the bottom edge
+          with no way to scroll to them. `max-h-full` also lets a one-lecture
+          section open as a short panel instead of a near-full-screen one. */}
+      <div className="bg-white rounded shadow border border-gray-200 overflow-hidden text-[12px] flex max-h-full w-full max-w-4xl flex-col">
         {/* Header */}
         <div className="bg-[#3482AE] px-4 py-2 flex items-center justify-between shrink-0">
           <h2 className="text-white font-bold uppercase tracking-wide">Add Section</h2>
@@ -590,6 +629,9 @@ function SectionModal({ onClose, onAdd }) {
         </div>
 
         <div className="flex shrink-0 justify-center gap-4 border-t border-gray-200 bg-[#f8f9fa] p-3">
+          {/* Named for what they do, not SUBMIT / CANCEL: that pair belongs to
+              the module form behind this dialog, and repeating it here left two
+              SUBMIT buttons on one screen meaning different things. */}
           <button type="button" onClick={handleAdd} className={SUBMIT_BTN}>
             ADD SECTION
           </button>
@@ -779,6 +821,7 @@ export default function ModuleForm({
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
+              placeholder="Enter course name"
               className={inputCls}
             />
           </Field>
@@ -927,12 +970,23 @@ export default function ModuleForm({
 
       {/* 2. COURSE MATERIAL DETAILS */}
       <section className="bg-white rounded shadow border border-gray-200 overflow-hidden text-[12px]">
-        <SectionHeader title="Course Material" />
+        {/* Add Section rides in the heading rather than sitting above the list
+            it adds to: on a course with several sections the button was a
+            scroll away from the bottom of them, and the heading is the one part
+            of the card that is always in view. */}
+        <SectionHeader
+          title="Course Material"
+          action={
+            <button
+              type="button"
+              onClick={() => setModalOpen(true)}
+              className={addSectionCls}
+            >
+              <Plus className="h-3.5 w-3.5" /> Add Section
+            </button>
+          }
+        />
         <div className="p-3 space-y-4">
-          <button type="button" onClick={() => setModalOpen(true)} className={addMoreCls}>
-            <Plus className="h-3.5 w-3.5" /> Add Section
-          </button>
-
           {sections.length > 0 ? (
             <ul className="space-y-2">
               {sections.map((section, i) => (
@@ -950,8 +1004,8 @@ export default function ModuleForm({
             </ul>
           ) : (
             <p className="rounded-md border border-dashed border-gray-300 bg-[#f4f6f9] px-4 py-6 text-center text-[12px] text-gray-500">
-              No sections added yet. Click <strong>Add Section</strong> to build
-              the course content.
+              No sections added yet. Use <strong>Add Section</strong> above to
+              Open the course content.
             </p>
           )}
 
@@ -959,24 +1013,30 @@ export default function ModuleForm({
             <p className="text-[11px] font-semibold text-[#f23a4c]">{error}</p>
           ) : null}
 
-          {/* payroll puts the Apply/Cancel pair centred at the foot of a form. */}
-          <div className="flex items-center justify-center gap-4 border-t border-gray-200 pt-4">
-            <button
-              type="button"
-              disabled={submitting}
-              onClick={handleSubmit}
-              className={SUBMIT_BTN}
-            >
-              {submitting ? (progress ?? "SUBMITTING...") : "SUBMIT"}
-            </button>
-            <button
-              type="button"
-              onClick={() => (onCancel ? onCancel() : router.back())}
-              className={CANCEL_BTN}
-            >
-              CANCEL
-            </button>
-          </div>
+          {/* payroll puts the Apply/Cancel pair centred at the foot of a form.
+              It appears with the first section: a module cannot be submitted
+              without one, so before that the pair is a button that can only
+              refuse. The dashboard's own tabs are the way off this screen while
+              it is hidden. */}
+          {sections.length > 0 ? (
+            <div className="flex animate-fadeInUp items-center justify-center gap-4 border-t border-gray-200 pt-4">
+              <button
+                type="button"
+                disabled={submitting}
+                onClick={handleSubmit}
+                className={SUBMIT_BTN}
+              >
+                {submitting ? (progress ?? "SUBMITTING...") : "SUBMIT"}
+              </button>
+              <button
+                type="button"
+                onClick={() => (onCancel ? onCancel() : router.back())}
+                className={CANCEL_BTN}
+              >
+                CANCEL
+              </button>
+            </div>
+          ) : null}
         </div>
       </section>
 

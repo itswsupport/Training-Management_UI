@@ -6,6 +6,7 @@
 
 import { api, unwrap } from "@/config/api";
 import { financialYearOf, quarterOf } from "@/services/MasterDataService";
+import { getCourseDetail } from "@/services/ModuleService";
 import {
   getLatestContentChange,
   getTransactions,
@@ -18,6 +19,105 @@ export const COURSE_STATUS = {
   COMPLETED: 2,
   OVERDUE: 3,
 };
+
+/**
+ * Local testing only: courses to treat as OVERDUE whatever the backend says.
+ *
+ * Nothing in this app can put a course into the overdue list — status 3 is set
+ * server-side when the course's quarter lapses, and the browser only ever reads
+ * it. That leaves the overdue screens untestable on a dev machine unless a real
+ * course happens to have lapsed for the employee you are signed in as. This
+ * forces one.
+ *
+ * Set it in .env.local to a JSON array:
+ *
+ *   NEXT_PUBLIC_FORCE_OVERDUE=[{"id":277,"no":"FT-277","name":"js-test"}]
+ *
+ * `id` must be the numeric module id (etms_emodule_master.id), because that is
+ * what the course link is built from. .env* is gitignored and NEXT_PUBLIC_* is
+ * inlined at build time, so a deployed build has this undefined and every
+ * branch below is dead code.
+ */
+const FORCED_OVERDUE = (() => {
+  const raw = process.env.NEXT_PUBLIC_FORCE_OVERDUE;
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [parsed];
+  } catch {
+    // A typo in .env.local must not take the dashboard down with it.
+    console.warn("NEXT_PUBLIC_FORCE_OVERDUE is not valid JSON — ignored.");
+    return [];
+  }
+})();
+
+/**
+ * A forced course in the same shape the real rows are mapped into.
+ *
+ * The course's own details are read from `/emodule` rather than taken from the
+ * .env spec. Category, instructor and the KRA quarter — and so the FINANCIAL
+ * YEAR and QUARTER columns derived from it — all live on the module, not on the
+ * learner's row, so a fixture built from the three fields in .env.local showed
+ * the course with every one of those columns empty. Anything the spec does
+ * name still wins, so a course id that does not exist yet can be described by
+ * hand.
+ */
+async function forcedRow(spec, index) {
+  let detail = null;
+  try {
+    detail = await getCourseDetail(spec.id);
+  } catch {
+    // Unreachable or not a real module — the fixture still appears, just thin.
+  }
+
+  const kraQuarter = clean(spec.kraQuarter) || detail?.kraQuarter || "";
+
+  return {
+    id: spec.id ?? -(index + 1),
+    no: clean(spec.no) || detail?.code || "",
+    name: clean(spec.name) || detail?.name || "",
+    category: clean(spec.category) || detail?.category || "—",
+    instructor: clean(spec.instructor) || detail?.instructor || "—",
+    description: clean(spec.description) || detail?.description || "",
+    status: COURSE_STATUS.OVERDUE,
+    // Both blank on a real overdue row too: the grade is written when a course
+    // is completed, and the stamp with it.
+    grade: "-",
+    regDate: "",
+    regTime: "",
+    completedOn: "",
+    completedValue: null,
+    kraQuarter,
+    quarter: quarterOf(kraQuarter),
+    financialYear: financialYearOf(kraQuarter),
+    empName: "",
+  };
+}
+
+/**
+ * Puts the forced courses into the overdue list and takes them out of every
+ * other one.
+ *
+ * Both halves matter. getAssignedStatus asks all four statuses at once and
+ * takes the first hit in 0,1,2,3 order, so a course left standing in Pending as
+ * well would still answer PENDING — and the course page would never go
+ * read-only, which is the behaviour being tested.
+ */
+async function applyForcedOverdue(rows, status) {
+  if (FORCED_OVERDUE.length === 0) return rows;
+
+  const forcedIds = new Set(FORCED_OVERDUE.map((c) => String(c.id)));
+  if (status !== COURSE_STATUS.OVERDUE) {
+    return rows.filter((row) => !forcedIds.has(String(row.id)));
+  }
+
+  // Already lapsed for real — leave the backend's own row alone.
+  const present = new Set(rows.map((row) => String(row.id)));
+  const missing = FORCED_OVERDUE.filter((c) => !present.has(String(c.id)));
+  if (missing.length === 0) return rows;
+
+  return [...rows, ...(await Promise.all(missing.map(forcedRow)))];
+}
 
 /**
  * @param {string} empCode
@@ -36,7 +136,7 @@ export async function getUserCourses(empCode, status, filter = {}) {
   const list =
     unwrap(await api.get("/user_module/by_status", { params }), []) ?? [];
 
-  return list.map((row, index) => {
+  const rows = list.map((row, index) => {
     const e = row.trainingEmodule ?? {};
     const u = row.user ?? {};
     return {
@@ -64,6 +164,8 @@ export async function getUserCourses(empCode, status, filter = {}) {
       empName: fullName(u.employeeFname, u.employeeLname),
     };
   });
+
+  return applyForcedOverdue(rows, status);
 }
 
 /**
