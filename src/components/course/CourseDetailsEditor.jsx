@@ -1,10 +1,17 @@
 "use client";
 
-import React, { useImperativeHandle, useMemo, useState } from "react";
+import React, {
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Lock, Plus } from "lucide-react";
 
 import MultiSelect from "@/components/ui/common/MultiSelect";
 import SearchableSelect from "@/components/ui/common/SearchableSelect";
+import useAudienceOptions from "@/hooks/useAudienceOptions";
 import { useAuth } from "@/context/AuthContext";
 import { getEmpCode } from "@/lib/permissions";
 import { alerts } from "@/lib/alerts";
@@ -12,7 +19,9 @@ import { apiErrorMessage } from "@/config/api";
 import {
   QUARTER_OPTIONS,
   financialYearOf,
+  getAllottedEmployees,
   instructorName,
+  plantLabel,
 } from "@/services/MasterDataService";
 import { updateModuleDetails } from "@/services/ModuleService";
 
@@ -58,6 +67,72 @@ export default function CourseDetailsEditor({ course, options, ref }) {
   const [deptIds, setDeptIds] = useState(course.deptIds);
   const [gradeIds, setGradeIds] = useState(course.gradeIds);
 
+  /**
+   * Plant and the named employees, filled in from the course's real allotment
+   * rather than left empty.
+   *
+   * Neither is stored on the module, so both are read back from the people it
+   * actually went to: their codes are the USER field, and the sites they work
+   * at are the PLANT field. The form used to open with both blank on a course
+   * already out with a hundred people, which read as a course assigned to
+   * nobody.
+   *
+   * Allotment is only ever added to: the backend skips an employee who already
+   * has the course and never takes it off anyone, so editing these fields
+   * cannot withdraw a course from someone part-way through it.
+   */
+  const [plantIds, setPlantIds] = useState([]);
+  const [empCodes, setEmpCodes] = useState([]);
+  const [allotted, setAllotted] = useState([]);
+
+  /**
+   * What the fields were filled with, so `save` can tell an untouched pair from
+   * a deliberate one. Untouched must not narrow: the four filters are an AND,
+   * so saving a course back with its existing hundred people ticked would mean
+   * "only these hundred" and a department added in the same edit would reach
+   * nobody new. A ref, not state — it is read at save time and must never
+   * cause a render.
+   */
+  const initial = useRef({ plantIds: [], empCodes: [] });
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const rows = await getAllottedEmployees(course.id);
+        if (cancelled) return;
+        const codes = rows.map((e) => e.code);
+        // One entry per site, and only sites that are actually named — an
+        // employee with no plant on their record must not tick "no plant".
+        const plants = [...new Set(rows.map((e) => e.plantId).filter(Boolean))];
+        setAllotted(rows);
+        setEmpCodes(codes);
+        setPlantIds(plants);
+        initial.current = { plantIds: plants, empCodes: codes };
+      } catch {
+        // An unreadable allotment leaves both fields empty, which is how this
+        // form has always opened — the edit still saves, it simply does not
+        // show who the course already went to.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [course.id]);
+
+  const { departments, audienceOptions, audienceLoading } = useAudienceOptions({
+    allDepartments: options.departments,
+    plantIds,
+    deptIds,
+    gradeIds,
+    setDeptIds,
+    setEmpCodes,
+    // The people already on the course stay on offer and stay ticked even when
+    // today's filters no longer reach them.
+    alwaysInclude: allotted,
+  });
+
   const [error, setError] = useState(null);
 
   // Courses saved before the dropdown carried employee codes hold a bare name,
@@ -90,6 +165,14 @@ export default function CourseDetailsEditor({ course, options, ref }) {
     if (deptIds.length === 0) return reject("Please select at least one department.");
     if (gradeIds.length === 0) return reject("Please select at least one grade.");
 
+    // Read here rather than during render: this is the moment the answer is
+    // needed, and a ref must not be read while rendering.
+    const sameSet = (a, b) =>
+      a.length === b.length && a.every((v) => b.includes(v));
+    const untouchedAudience =
+      sameSet(plantIds, initial.current.plantIds) &&
+      sameSet(empCodes, initial.current.empCodes);
+
     // Carried through untouched. The officer cannot pick a quarter here, so
     // there is nothing to recompute — and recomputing would be the bug this
     // guards against, since it would re-date the course's window and put it
@@ -112,8 +195,11 @@ export default function CourseDetailsEditor({ course, options, ref }) {
         author: instructorName(author),
         description: description.trim(),
         objectives: objectives.map((o) => o.trim()).filter(Boolean),
+        // Sent only when the officer actually changed them; see `initial`.
+        plantIds: untouchedAudience ? [] : plantIds,
         deptIds,
         gradeIds,
+        empCodes: untouchedAudience ? [] : empCodes,
         status: course.status,
         regBy: course.regBy,
         regDate: course.regDate,
@@ -159,6 +245,9 @@ export default function CourseDetailsEditor({ course, options, ref }) {
             onChange={setCategoryId}
             placeholder="- Select Category -"
             searchPlaceholder="Search category…"
+            // Clearable here as on the Add Module form: a wrong pick otherwise
+            // has no way out except picking another one.
+            clearable
           />
         </Field>
 
@@ -169,6 +258,7 @@ export default function CourseDetailsEditor({ course, options, ref }) {
             onChange={setAuthor}
             placeholder="- Select Instructor -"
             searchPlaceholder="Search instructor…"
+            clearable
           />
         </Field>
 
@@ -182,16 +272,47 @@ export default function CourseDetailsEditor({ course, options, ref }) {
           />
         </Field>
 
+        {/* The four audience filters, in the order they narrow by — site, then
+            function, then seniority, then named people — exactly as the Add
+            Module form has them. Plant and Select User were missing here, so a
+            course could only ever be re-aimed at whole departments and grades:
+            handing one to a single named employee meant raising a second course
+            for them alone. */}
+        <Field label="PLANT:">
+          <MultiSelect
+            options={options.plants.map((p) => ({
+              value: String(p.id),
+              label: plantLabel(p),
+            }))}
+            selected={plantIds}
+            onChange={setPlantIds}
+            placeholder="All plants"
+            searchPlaceholder="Search plant name or code…"
+            allLabel="All plants"
+          />
+        </Field>
+
         <Field label="DEPARTMENT:">
           <MultiSelect
-            options={options.departments.map((d) => ({
+            // Plant-wise once a plant is picked, so the officer chooses from
+            // the departments actually staffed there.
+            options={departments.map((d) => ({
               value: String(d.id),
               label: d.name,
             }))}
             selected={deptIds}
             onChange={setDeptIds}
-            placeholder="Select department(s)"
+            placeholder={
+              plantIds.length > 0
+                ? "Select department(s) at these plants"
+                : "Select department(s)"
+            }
             searchPlaceholder="Search department…"
+            allLabel={
+              plantIds.length > 0
+                ? "All departments at these plants"
+                : "All departments"
+            }
           />
         </Field>
 
@@ -205,7 +326,52 @@ export default function CourseDetailsEditor({ course, options, ref }) {
             onChange={setGradeIds}
             placeholder="Select grade(s)"
             searchPlaceholder="Search grade…"
+            allLabel="All grades"
           />
+        </Field>
+
+        <Field label="SELECT USER:">
+          <MultiSelect
+            // Codes only, as on the Add Module form — see the note there.
+            options={audienceOptions.map((e) => ({
+              value: e.code,
+              label: e.code,
+              search: e.label,
+            }))}
+            selected={empCodes}
+            onChange={setEmpCodes}
+            // The empty field has to explain itself — it reads as broken
+            // otherwise, and the reason differs.
+            placeholder={
+              deptIds.length === 0
+                ? "Select department first"
+                : audienceLoading
+                  ? "Loading employees…"
+                  : audienceOptions.length === 0
+                    ? "No matching employees"
+                    : `All ${audienceOptions.length} employee${
+                        audienceOptions.length === 1 ? "" : "s"
+                      }`
+            }
+            searchPlaceholder="Search employee name or code…"
+            allLabel={
+              audienceOptions.length > 0
+                ? `All ${audienceOptions.length} employees`
+                : ""
+            }
+          />
+          {/* Said out loud, because the field is doing two things at once: it
+              reports who has the course and it decides who else gets it. The
+              second half is the one that surprises — taking a name out reads
+              like withdrawing the course, and it does not. */}
+          {allotted.length > 0 ? (
+            <p className="mt-1 text-[11px] normal-case text-gray-500">
+              Assigned to {allotted.length} employee
+              {allotted.length === 1 ? "" : "s"}. Adding a name assigns the
+              course to them as well; removing one does not take it away from
+              anyone who already has it.
+            </p>
+          ) : null}
         </Field>
 
         {/* Shown, not editable. Moving a course's quarter moves the window it

@@ -13,7 +13,10 @@ import FilterBar from "@/components/dashboards/FilterBar";
 import QuarterFilters from "@/components/dashboards/QuarterFilters";
 import ToolbarSelect from "@/components/ui/common/ToolbarSelect";
 import { apiErrorMessage } from "@/config/api";
-import { useQuarterFilter } from "@/hooks/useQuarterFilter";
+import {
+  quarterFilterParams,
+  useQuarterFilter,
+} from "@/hooks/useQuarterFilter";
 import { getCourseStatusRows } from "@/services/CourseStatusService";
 
 export default function CourseStatus() {
@@ -32,8 +35,7 @@ export default function CourseStatus() {
       setData(
         await getCourseStatusRows({
           force,
-          financialYear: filter.year,
-          quarter: filter.quarter,
+          ...quarterFilterParams(filter.year, filter.quarter),
         })
       );
     } catch (err) {

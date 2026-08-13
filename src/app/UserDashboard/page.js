@@ -18,6 +18,7 @@ import QuarterFilters from "@/components/dashboards/QuarterFilters";
 import { useAuth } from "@/context/AuthContext";
 import {
   LEARNER_FILTER_KEY,
+  quarterFilterParams,
   useQuarterFilter,
 } from "@/hooks/useQuarterFilter";
 import { getEmpCode } from "@/lib/permissions";
@@ -73,8 +74,13 @@ export default function UserDashboard() {
   const empCode = getEmpCode(user);
 
   // One selection across all four tabs, on its own key so a learner who is also
-  // a training officer does not carry one screen's filter into the other.
-  const filter = useQuarterFilter(LEARNER_FILTER_KEY);
+  // a training officer does not carry one screen's filter into the other. Opens
+  // on every year and quarter, unlike the officer's screens: a learner has to be
+  // able to see a course the moment it is assigned, including one raised for a
+  // quarter — or a year — still ahead.
+  const filter = useQuarterFilter(LEARNER_FILTER_KEY, {
+    openOnEverything: true,
+  });
 
   const [activeTab, setActiveTab] = useState("pending");
   const [data, setData] = useState([]);
@@ -93,10 +99,7 @@ export default function UserDashboard() {
       // Only the lists that show an ASSIGNED ON column pay for the history
       // read behind it — the completed list shows when the course was
       // finished, which is on the learner's own row already.
-      const quarterFilter = {
-        financialYear: filter.year,
-        quarter: filter.quarter,
-      };
+      const quarterFilter = quarterFilterParams(filter.year, filter.quarter);
       setData(
         active.status === COURSE_STATUS.COMPLETED
           ? await getUserCourses(empCode, active.status, quarterFilter)

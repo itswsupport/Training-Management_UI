@@ -3,9 +3,11 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  BookOpen,
   ChevronDown,
   CircleCheckBig,
   CirclePlay,
+  ClipboardList,
   FileText,
   Lock,
 } from "lucide-react";
@@ -14,9 +16,11 @@ import MaterialViewer from "@/components/course/MaterialViewer";
 import { useAuth } from "@/context/AuthContext";
 import { encodeId } from "@/lib/courseId";
 import { getEmpCode } from "@/lib/permissions";
+import { EXAM_TYPES, EXAM_TYPE_LIST, examTypeLabel } from "@/lib/examType";
 import {
   getAssignmentQuestions,
-  isAssignmentSubmitted,
+  getSubmittedAnswers,
+  isPaperSubmitted,
 } from "@/services/AssignmentService";
 import { isEmbeddableVideo } from "@/lib/video";
 import { MATERIAL_KINDS } from "@/services/ProgressService";
@@ -56,14 +60,24 @@ function questionsByLecture(lectures, questions) {
  * the moment a video is opened, which is exactly why the legacy UI had it
  * commented out. So progress is remembered per browser instead — it survives a
  * refresh and revisits, but does not follow the learner to another device.
+ *
+ * Keyed on the attempt as well, so a course handed back after a grade C starts
+ * from nothing. Without that the previous sitting's ticks were still there when
+ * it returned: every lecture already read as opened, the post assignment
+ * unlocked on arrival, and the learner could go straight back to the paper they
+ * had just failed without reopening any of the material. The old attempt's
+ * ticks are simply left under their own key rather than deleted — they are that
+ * sitting's record, and nothing reads them again.
  */
-const watchedStorageKey = (empCode, emoduleId) =>
-  `etms:watched:${empCode || "anon"}:${emoduleId}`;
+const watchedStorageKey = (empCode, emoduleId, attempt) =>
+  `etms:watched:${empCode || "anon"}:${emoduleId}:${attempt}`;
 
-function readWatched(empCode, emoduleId) {
+function readWatched(empCode, emoduleId, attempt) {
   if (typeof window === "undefined") return new Set();
   try {
-    const raw = window.localStorage.getItem(watchedStorageKey(empCode, emoduleId));
+    const raw = window.localStorage.getItem(
+      watchedStorageKey(empCode, emoduleId, attempt)
+    );
     const parsed = raw ? JSON.parse(raw) : [];
     return new Set(Array.isArray(parsed) ? parsed : []);
   } catch {
@@ -169,6 +183,138 @@ function MaterialLink({ inPage, href, onOpen, onTabOpen, className, children }) 
 /** The stored tick for ONE material of one lecture. */
 const materialKey = (lecture, materialId) => `${lecture}::${materialId}`;
 
+/** An unread section's papers — both known to exist, neither loaded yet. */
+const emptyPapers = () =>
+  Object.fromEntries(EXAM_TYPE_LIST.map((t) => [t.value, []]));
+
+/** The paper sat after the lectures — the one that reports on the content. */
+const POST_TYPE = EXAM_TYPES.POST;
+
+/**
+ * The two states an assignment link has, section-wide and per lecture alike.
+ *
+ * Shared so a paper looks the same wherever it is offered. They were drifting:
+ * the section rows started a paper in brand blue while the lecture dropdown
+ * started one in the same green the SUBMITTED badge uses, so on a section with
+ * one paper done and one outstanding the screen showed two green buttons
+ * meaning opposite things. Green now only ever means finished.
+ */
+/**
+ * Every action in the right-hand rail is the same size, so the buttons line up
+ * down the panel instead of each one hugging its own label — "Watch video" and
+ * "Start post assignment" sat at different widths and the edge read as ragged.
+ */
+const RAIL_BTN =
+  "inline-flex min-w-[11rem] shrink-0 items-center justify-center gap-1.5 rounded px-3 py-1.5 text-[11px] font-bold tracking-wide uppercase transition-colors focus-visible:outline-2 focus-visible:outline-offset-2";
+
+const PAPER_START_BTN = `${RAIL_BTN} bg-[#3482AE] text-white shadow-sm hover:bg-[#2b6b90] focus-visible:outline-[#3482AE]`;
+const PAPER_DONE_BTN = `${RAIL_BTN} bg-[#20c997]/15 text-[#158765] ring-1 ring-[#20c997]/30 hover:bg-[#20c997]/25 focus-visible:outline-[#20c997]`;
+/** A lecture's own material action — the same size, a lighter weight. */
+const MATERIAL_BTN = `${RAIL_BTN} cursor-pointer border border-[#3482AE]/35 bg-white text-[#2a6a8f] hover:bg-[#eaf3f9] focus-visible:outline-[#3482AE]`;
+/** A paper that cannot be opened yet. Same footprint, plainly not a button. */
+const PAPER_LOCKED_BTN = `${RAIL_BTN} cursor-not-allowed bg-gray-200 text-gray-500`;
+
+/**
+ * One paper's row — pre or post.
+ *
+ * ONE component renders both, which is the point: the post assignment is not a
+ * lesser thing with its own smaller styling, it is the same row with a
+ * different label. Anything that changes here changes for both by
+ * construction, so they cannot drift apart.
+ *
+ * The two bracket the lectures rather than sitting together above them, so each
+ * is drawn against the edge it sits on: the pre row closes downward into the
+ * list, the post row is a heavier rule that closes the section off. They used to
+ * be rendered as a pair at the head, which put the post assignment in front of
+ * the very lectures its own text told the learner to work through first.
+ *
+ * @param {string} examType which paper
+ * @param {Array} questions its questions — empty when none were set
+ * @param {boolean} submitted this learner has already answered all of them
+ * @param {string|null} href the assignment page for it, null for an unsaved
+ *   section
+ * @param {boolean} preview an officer looking rather than sitting it
+ * @param {boolean} [locked] the lectures this paper reports on have not all
+ *   been worked through yet, so it cannot be opened
+ * @param {string} [lockedReason] what is still outstanding, said plainly — a
+ *   row that simply refuses to open reads as broken
+ */
+function AssignmentRow({
+  examType,
+  questions,
+  submitted,
+  href,
+  preview,
+  locked = false,
+  lockedReason = "",
+}) {
+  const label = examTypeLabel(examType);
+  const count = questions.length;
+  const isPost = examType === EXAM_TYPES.POST;
+
+  const frame = isPost
+    ? "border-t-2 border-[#3482AE]/30 bg-[#eaf3f9]"
+    : "border-b border-gray-200 bg-[#eaf3f9]/60";
+
+  if (count === 0) {
+    return (
+      <div className={`px-4 py-2.5 ${frame}`}>
+        <p className="flex items-center gap-2 text-[12px] normal-case text-gray-400">
+          <ClipboardList className="h-3.5 w-3.5 shrink-0" />
+          No {label.toLowerCase()} has been set for this section.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`px-4 py-3 ${frame}`}>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <span className="flex shrink-0 items-center gap-2 text-[12px] font-bold tracking-wide text-[#2f6685] uppercase">
+          <ClipboardList className="h-4 w-4 shrink-0 text-[#3482AE]" />
+          {label}
+        </span>
+        <span className="min-w-0 flex-1 text-[12px] normal-case text-gray-600">
+          {count} question{count === 1 ? "" : "s"}
+          {/* Each state says what the learner is to do about it, in the same
+              plain voice. "Sit this", which the two hints used to open with,
+              is the British exam idiom and was read here as a typo for
+              something else — nobody on this floor says they are sitting an
+              assignment. */}
+          {submitted
+            ? " — already submitted."
+            : locked
+              ? ` — ${lockedReason}`
+              : isPost
+                ? " — complete this after you finish all the lectures above."
+                : " — complete this before you start the lectures below."}
+        </span>
+        {href ? (
+          submitted ? (
+            <Link href={href} className={PAPER_DONE_BTN}>
+              <CircleCheckBig className="h-3 w-3" />
+              Submitted — view answers
+            </Link>
+          ) : locked ? (
+            // Deliberately not a dead-looking link: it is a real state with a
+            // reason, and the row beside it says what still has to be done.
+            <span className={PAPER_LOCKED_BTN} aria-disabled="true">
+              <Lock className="h-3 w-3" />
+              Locked
+            </span>
+          ) : (
+            <Link href={href} className={PAPER_START_BTN}>
+              <ClipboardList className="h-3 w-3" />
+              {/* An officer cannot sit it — the page opens read-only. */}
+              {preview ? "View" : "Start"} {label.toLowerCase()}
+            </Link>
+          )
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 /**
  * One material's value in the lecture dropdown — a filename or a URL.
  *
@@ -189,11 +335,24 @@ const materialTickCls =
   "ml-2 text-[12px] font-semibold normal-case text-[#20c997]";
 
 /**
- * "Course content": collapsible sections, each listing its lectures with a
- * play/file icon, an expandable detail dropdown, and a Preview link that opens
- * the lecture's material. A section's assignment stays locked until every
- * lecture's material has been opened — so the learner must go through the
- * content before starting the assignment.
+ * "Course content": collapsible sections, each running the same three steps in
+ * the same order, with each step waiting for the one before it.
+ *
+ *   1. the pre assignment — sat before any of the material is opened
+ *   2. the lectures — locked until that paper is in
+ *   3. the post assignment — locked until every lecture has been opened
+ *
+ * The lectures gate on the pre paper only, which the server can vouch for. The
+ * post paper gates on the watched ticks below, which are a per-browser record —
+ * so a learner who changes device has to reopen the material before that paper
+ * comes back. That is the known cost of having no server-side "lecture viewed"
+ * to gate on; see watchedStorageKey.
+ *
+ * A step that cannot be completed never shuts the one after it: a section with
+ * no pre paper does not lock its lectures, and one with no lectures does not
+ * lock its post paper. A training officer sees all three open — nothing they
+ * open is ticked off, so no gate would ever lift for them and they could never
+ * check the course they wrote.
  */
 /**
  * @param {boolean} preview a training officer looking at the content rather
@@ -209,6 +368,7 @@ export default function CourseContent({
   sections = [],
   preview = false,
   onPlay,
+  attempt = 0,
 }) {
   const { user } = useAuth();
   const empCode = getEmpCode(user);
@@ -225,15 +385,15 @@ export default function CourseContent({
   // URL, so two chapters sharing a video link stay independent. Restored from
   // storage so a refresh doesn't re-lock the assignment.
   const [watched, setWatched] = useState(() =>
-    preview ? new Set() : readWatched(empCode, emoduleId)
+    preview ? new Set() : readWatched(empCode, emoduleId, attempt)
   );
 
   // The session is restored asynchronously by AuthProvider, so empCode can
   // arrive after the first render — re-read once it does.
   useEffect(() => {
     if (preview) return;
-    setWatched(readWatched(empCode, emoduleId));
-  }, [empCode, emoduleId, preview]);
+    setWatched(readWatched(empCode, emoduleId, attempt));
+  }, [empCode, emoduleId, preview, attempt]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -242,20 +402,21 @@ export default function CourseContent({
     if (preview) return;
     try {
       window.localStorage.setItem(
-        watchedStorageKey(empCode, emoduleId),
+        watchedStorageKey(empCode, emoduleId, attempt),
         JSON.stringify([...watched])
       );
     } catch {
       // A full or blocked storage quota must not break the page.
     }
-  }, [watched, empCode, emoduleId, preview]);
+  }, [watched, empCode, emoduleId, preview, attempt]);
 
-  // sectionId → questions, read the first time a section with an assignment is
-  // opened. Only the lecture each question belongs to is used here.
+  // sectionId → {PRE: [...], POST: [...]}, read the first time a section with
+  // an assignment is opened. Both papers, so each row can say what it holds.
   const [questionsBySection, setQuestionsBySection] = useState({});
-  // sectionId → true once this learner has submitted that section's assignment.
-  // Submission is per section, so every lecture in one reads the same.
-  const [submittedBySection, setSubmittedBySection] = useState({});
+  // sectionId → {questionId: answer} for everything this learner has answered
+  // in that section. This is what tells the pre and post rows apart: the
+  // backend's own "submitted" flag is section-wide and cannot.
+  const [answersBySection, setAnswersBySection] = useState({});
 
   const loadQuestions = useCallback(
     async (section) => {
@@ -263,25 +424,40 @@ export default function CourseContent({
       let alreadyAsked = false;
       setQuestionsBySection((prev) => {
         alreadyAsked = section.id in prev;
-        return alreadyAsked ? prev : { ...prev, [section.id]: [] };
+        return alreadyAsked ? prev : { ...prev, [section.id]: emptyPapers() };
       });
       if (alreadyAsked) return;
       try {
-        const list = await getAssignmentQuestions(emoduleId, section.id);
-        setQuestionsBySection((prev) => ({ ...prev, [section.id]: list }));
+        // Both papers at once — a section's post assignment is as much a part
+        // of it as its pre assignment, and neither row can render without its
+        // own question count.
+        const papers = await Promise.all(
+          EXAM_TYPE_LIST.map((t) =>
+            getAssignmentQuestions(emoduleId, section.id, t.value)
+          )
+        );
+        const byType = Object.fromEntries(
+          EXAM_TYPE_LIST.map((t, i) => [t.value, papers[i]])
+        );
+        setQuestionsBySection((prev) => ({ ...prev, [section.id]: byType }));
       } catch {
-        // The lecture rows simply fall back to the section-level assignment link.
+        // The rows fall back to reporting no questions rather than breaking.
       }
     },
     [emoduleId]
   );
 
   /**
-   * Which sections this learner has already submitted.
+   * What this learner has already answered, per section.
    *
    * Read for every section up front rather than as each one is expanded: it
    * decides the counts in the toolbar, and those have to be right on arrival.
    * An officer has no attempt of their own to report on, so it is not asked.
+   *
+   * `/submit_exam/answers` is used rather than `/submit_exam/by_sectionid`
+   * because the latter takes no paper and ignores one if sent — it can say the
+   * section was handed in, never which of the two. These rows carry question
+   * ids, and a question id belongs to exactly one paper.
    */
   useEffect(() => {
     if (preview || !empCode) return;
@@ -291,8 +467,8 @@ export default function CourseContent({
       sections
         .filter((s) => s.id && s.assignmentStatus === 1)
         .map((s) =>
-          isAssignmentSubmitted(emoduleId, s.id, empCode)
-            .then((done) => [s.id, done])
+          getSubmittedAnswers(emoduleId, s.id, empCode)
+            .then((answers) => [s.id, answers])
             // A failed lookup just leaves that section unknown; the assignment
             // page's own check catches it.
             .catch(() => null)
@@ -301,7 +477,7 @@ export default function CourseContent({
       if (cancelled) return;
       const next = Object.fromEntries(results.filter(Boolean));
       if (Object.keys(next).length > 0) {
-        setSubmittedBySection((prev) => ({ ...prev, ...next }));
+        setAnswersBySection((prev) => ({ ...prev, ...next }));
       }
     });
 
@@ -328,14 +504,21 @@ export default function CourseContent({
   /**
    * Has this learner finished the section the lecture sits in?
    *
-   * A submitted assignment settles it. The assignment cannot be reached until
-   * every material in the lecture has been opened, so having sat it is proof
-   * the content was worked through — and it is the only half of that record the
-   * server keeps. The ticks below are per browser, so without this a learner who
-   * sat the assignment on another machine, or cleared their storage, came back
-   * to a course reading 0/2 done beside their own SUBMITTED badge.
+   * Reads the POST paper, not the pre one. The post assignment is the one sat
+   * after the lectures, so having answered it is proof the content was worked
+   * through — the pre assignment is sat before any of it and says nothing about
+   * whether the material was opened. The ticks are per browser, so without this
+   * a learner who sat the paper on another machine, or cleared their storage,
+   * came back to a course reading 0/2 done beside their own SUBMITTED badge.
+   *
+   * This is the only half of that record the server keeps.
    */
-  const isSubmitted = (section) => submittedBySection[section.id] === true;
+  const isSubmitted = (section) => {
+    const papers = questionsBySection[section.id];
+    const answered = answersBySection[section.id];
+    if (!papers || !answered) return false;
+    return isPaperSubmitted(papers[POST_TYPE], answered);
+  };
 
   /**
    * Has this one material been opened?
@@ -439,7 +622,7 @@ export default function CourseContent({
     () => sections.reduce((n, s, i) => n + watchedIn(s, i), 0),
     // watched is a Set replaced on every change, so this recomputes when it does.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [sections, watched, submittedBySection]
+    [sections, watched, questionsBySection, answersBySection]
   );
 
   const allOpen = openSections.size === sections.length;
@@ -520,31 +703,80 @@ export default function CourseContent({
       {sections.map((section, i) => {
         const open = openSections.has(i);
         const sectionSubmitted = isSubmitted(section);
-        // Every material of every lecture must be opened before this section's
-        // assignment unlocks — not just one material per lecture. The gate is
-        // there to walk a learner through the content; an officer checking the
-        // paper is not doing that, so nothing is locked for them.
-        const assignmentLocked =
-          !preview &&
-          !sectionSubmitted &&
-          section.lectures.some((l, j) => {
-            const materials = materialsOf(l, emoduleId);
-            return (
-              materials.length > 0 &&
-              !lectureDone(lectureKey(section, l, i, j), materials)
-            );
-          });
 
-        const sectionQuestions = questionsBySection[section.id] ?? [];
-        const perLecture = questionsByLecture(section.lectures, sectionQuestions);
-        // With questions spread across the lectures there is nothing left for a
-        // section-wide row; it stays only for a section whose questions could
-        // not be placed (no lectures at all).
-        const placedQuestions = [...perLecture.values()].reduce(
-          (n, list) => n + list.length,
-          0
+        const papers = questionsBySection[section.id] ?? emptyPapers();
+        const answered = answersBySection[section.id] ?? null;
+        // Each paper spread over the lectures on its own, so a question is
+        // never placed against a lecture by counting the other paper's rows.
+        const perLecture = Object.fromEntries(
+          EXAM_TYPE_LIST.map((t) => [
+            t.value,
+            questionsByLecture(section.lectures, papers[t.value]),
+          ])
         );
+        // Every question of the section, both papers, so the header count and
+        // the lecture badges cover the whole of what was set for it.
+        const sectionQuestions = EXAM_TYPE_LIST.flatMap((t) => papers[t.value]);
         const sectionWatched = watchedIn(section, i);
+
+
+        /**
+         * The assignment page for one paper of this section. `type` is what
+         * decides which questions it loads, saves against and scores — without
+         * it the post paper would open as the pre one.
+         */
+        const paperHref = (examType, lectureId = null) => {
+          if (!section.id) return null;
+          const base = `/course/${encodeId(emoduleId)}/assignment/${encodeId(section.id)}?type=${examType}`;
+          return lectureId ? `${base}&lectureId=${encodeId(lectureId)}` : base;
+        };
+
+        /** Has this learner sat one paper of this section? */
+        const paperDone = (examType) =>
+          !preview && isPaperSubmitted(papers[examType], answered);
+
+        /**
+         * The section runs in one order, and each step waits for the one before
+         * it: pre assignment, then the lectures, then the post assignment.
+         *
+         * Declared here rather than higher up because they call `paperDone`, and
+         * a const arrow function cannot be called before its own declaration.
+         *
+         * Neither gate applies to an officer: nothing they open is ticked off —
+         * those ticks are a learner's progress record — so no gate would ever
+         * lift for them and they could never check the papers they wrote.
+         */
+
+        /**
+         * The lectures wait for the pre assignment — and for nothing else.
+         *
+         * Only where there IS one. A section with no pre paper has nothing to
+         * wait for, and gating on a paper that does not exist would shut its
+         * lectures for good.
+         */
+        const lecturesLocked =
+          !preview &&
+          papers[EXAM_TYPES.PRE].length > 0 &&
+          !paperDone(EXAM_TYPES.PRE);
+
+        /**
+         * Is every lecture in this section worked through?
+         *
+         * A section with no lectures counts as done — there is nothing to open,
+         * and a paper that could never be unlocked is worse than an ungated one.
+         * `watchedIn` already treats a lecture carrying no material at all as
+         * done, for the same reason.
+         */
+        const lecturesDone =
+          section.lectures.length === 0 ||
+          sectionWatched === section.lectures.length;
+
+        /**
+         * The post assignment waits for the lectures it reports on. Never
+         * applied to a paper already handed in, which stays readable.
+         */
+        const postLocked =
+          !preview && !lecturesDone && !paperDone(EXAM_TYPES.POST);
 
         return (
           <div key={section.id || i} className="border-b border-gray-200 last:border-b-0">
@@ -555,10 +787,10 @@ export default function CourseContent({
                 toggleSection(i);
               }}
               aria-expanded={open}
-              className="flex w-full cursor-pointer items-center gap-3 bg-[#f7f9fb] px-4 py-3.5 text-left transition-colors hover:bg-[#eef3f7]"
+              className="flex w-full cursor-pointer items-center gap-3 bg-[#f7f9fb] px-4 py-3.5 text-left outline-none transition-colors hover:bg-[#eef3f7] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#3482AE]"
             >
               <ChevronDown
-                className={`h-4 w-4 shrink-0 text-[#3482AE] transition-transform ${
+                className={`h-5 w-5 shrink-0 text-[#3482AE] transition-transform ${
                   open ? "rotate-180" : ""
                 }`}
               />
@@ -594,6 +826,45 @@ export default function CourseContent({
 
             {open ? (
               <div>
+                {/* The pre assignment, ahead of the lectures. Every
+                    section carries this row, so a learner is never left
+                    wondering whether one was set. */}
+                <AssignmentRow
+                  examType={EXAM_TYPES.PRE}
+                  questions={papers[EXAM_TYPES.PRE]}
+                  submitted={paperDone(EXAM_TYPES.PRE)}
+                  href={paperHref(EXAM_TYPES.PRE)}
+                  preview={preview}
+                />
+
+                {/* The lectures, between the two papers. Given a band of its
+                    own so the list has a heading and the rows are plainly the
+                    middle of the section rather than loose rows between two
+                    blue bars. Same brand tint and same icon-and-label shape as
+                    the papers, so the three read as one set — which is the work
+                    the 1/2/3 badges used to do. */}
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-gray-200 bg-[#eaf3f9] px-4 py-2.5">
+                  <span className="flex shrink-0 items-center gap-2 text-[12px] font-bold tracking-wide text-[#2f6685] uppercase">
+                    <BookOpen className="h-4 w-4 shrink-0 text-[#3482AE]" />
+                    Lectures
+                  </span>
+                  <span className="min-w-0 flex-1 text-[12px] normal-case text-gray-600">
+                    {section.lectures.length} lecture
+                    {section.lectures.length === 1 ? "" : "s"}
+                    {preview
+                      ? ""
+                      : lecturesLocked
+                        ? " — submit the pre assignment above to unlock these."
+                        : ` — ${sectionWatched} of ${section.lectures.length} opened.`}
+                  </span>
+                  {lecturesLocked ? (
+                    <span className={PAPER_LOCKED_BTN} aria-disabled="true">
+                      <Lock className="h-3 w-3" />
+                      Locked
+                    </span>
+                  ) : null}
+                </div>
+
                 {section.lectures.map((lecture, j) => {
                   const key = lectureKey(section, lecture, i, j);
                   const expanded = openLectures.has(key);
@@ -615,13 +886,23 @@ export default function CourseContent({
                   const hasDetail = Boolean(
                     lecture.materialFile || lecture.materialVideo || lecture.link
                   );
-                  const lectureQuestions = perLecture.get(lecture.id) ?? [];
-                  // A lecture with nothing to open has nothing to finish, so
-                  // its assignment is available immediately.
-                  const lectureLocked = !preview && materials.length > 0 && !done;
-                  // The dropdown also has to open for a lecture whose only
-                  // extra is its assignment, or it could never be reached.
-                  const hasDropdown = hasDetail || lectureQuestions.length > 0;
+                  // How many of the section's questions are about this lecture,
+                  // across both papers. Kept as the row's "2 Q" badge — it tells
+                  // a learner which lectures the papers actually draw on — but
+                  // it no longer opens anything: the papers are sat from the
+                  // section rows, not per lecture.
+                  const lectureQuestions = EXAM_TYPE_LIST.reduce(
+                    (n, type) =>
+                      n + (perLecture[type.value].get(lecture.id)?.length ?? 0),
+                    0
+                  );
+                  // Materials only. It used to open for a lecture whose only
+                  // extra was its assignment links; with those gone that would
+                  // be an empty panel. Shut entirely while the lectures are
+                  // locked — the dropdown lists the very files and videos the
+                  // gate exists to hold back, so leaving it openable would be
+                  // a way straight around it.
+                  const hasDropdown = hasDetail && !lecturesLocked;
 
                   return (
                     <div
@@ -650,28 +931,41 @@ export default function CourseContent({
                         <button
                           type="button"
                           onClick={() => hasDropdown && toggleLecture(key)}
-                          className={`flex min-w-0 flex-1 items-center gap-1.5 text-left ${
+                          // outline-none only kills the ring a mouse click
+                          // leaves behind — the default one is drawn around the
+                          // whole flex-1 row and reads as a text input sitting
+                          // in the middle of the list. focus-visible keeps it
+                          // for anyone arriving by keyboard, who needs it.
+                          className={`flex min-w-0 flex-1 items-center gap-1.5 rounded text-left outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#3482AE] ${
                             hasDropdown ? "cursor-pointer" : "cursor-default"
                           }`}
                         >
                           <span className="truncate text-[13px] font-semibold normal-case text-gray-700">
                             {lecture.name || `Lecture ${j + 1}`}
                           </span>
-                          {lectureQuestions.length > 0 ? (
+                          {lectureQuestions > 0 ? (
                             <span className="shrink-0 rounded bg-[#3482AE]/10 px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-[#2a6a8f] uppercase">
-                              {lectureQuestions.length} Q
+                              {lectureQuestions} Q
                             </span>
                           ) : null}
                           {hasDropdown ? (
                             <ChevronDown
-                              className={`h-3 w-3 shrink-0 text-gray-400 transition-transform ${
+                              className={`h-4 w-4 shrink-0 text-gray-400 transition-transform ${
                                 expanded ? "rotate-180" : ""
                               }`}
                             />
                           ) : null}
                         </button>
 
-                        {materials.length === 0 ? null : done ? (
+                        {materials.length === 0 ? null : lecturesLocked ? (
+                          // The row's button is the other way into the material,
+                          // so it has to close with the dropdown or the gate
+                          // holds nothing back.
+                          <span className={PAPER_LOCKED_BTN} aria-disabled="true">
+                            <Lock className="h-3 w-3" />
+                            Locked
+                          </span>
+                        ) : done ? (
                           <span className="shrink-0 rounded-full bg-[#20c997]/15 px-2.5 py-1 text-[11px] font-bold tracking-wide text-[#158765] uppercase">
                             Completed
                           </span>
@@ -697,7 +991,7 @@ export default function CourseContent({
                                     lectureId: lecture.id,
                                   })
                                 }
-                                className="cursor-pointer rounded bg-[#3482AE] px-3 py-1.5 text-[11px] font-bold tracking-wide text-white uppercase transition-colors hover:bg-[#2b6b90]"
+                                className={MATERIAL_BTN}
                               >
                                 {materialAction(nextMaterial)}
                               </button>
@@ -710,7 +1004,7 @@ export default function CourseContent({
                                     lectureId: lecture.id,
                                   })
                                 }
-                                className="cursor-pointer rounded bg-[#3482AE] px-3 py-1.5 text-[11px] font-bold tracking-wide text-white uppercase transition-colors hover:bg-[#2b6b90]"
+                                className={MATERIAL_BTN}
                               >
                                 {materialAction(nextMaterial)}
                               </button>
@@ -722,7 +1016,7 @@ export default function CourseContent({
                                 onClick={() =>
                                   markWatched(materialKey(key, nextMaterial.id))
                                 }
-                                className="rounded bg-[#3482AE] px-3 py-1.5 text-[11px] font-bold tracking-wide text-white uppercase transition-colors hover:bg-[#2b6b90]"
+                                className={MATERIAL_BTN}
                               >
                                 {materialAction(nextMaterial)}
                               </a>
@@ -851,101 +1145,50 @@ export default function CourseContent({
                             </p>
                           ) : null}
 
-                          {/* This lecture's own assignment, inside its
-                              dropdown with the rest of its material. It opens
-                              once the material has been opened, so the learner
-                              works through lecture 1, answers its questions,
-                              then moves on to lecture 2. */}
-                          {lectureQuestions.length > 0 ? (
-                            <p className="border-t border-gray-200 pt-2 text-xs normal-case">
-                              <span className="font-semibold text-gray-500">
-                                Assignment:{" "}
-                              </span>
-                              {/* Submission is per section, so once it is in,
-                                  every lecture in that section says so — the
-                                  link used to keep inviting the learner to
-                                  start an assignment they had already sat, and
-                                  only the page it opened admitted otherwise. */}
-                              {sectionSubmitted ? (
-                                // A submitted assignment used to be a dead
-                                // badge, so a learner could never look back at
-                                // what they had answered. It opens read-only.
-                                <Link
-                                  href={`/course/${encodeId(emoduleId)}/assignment/${encodeId(section.id)}?lectureId=${encodeId(lecture.id)}`}
-                                  className="inline-flex items-center gap-1.5 rounded bg-[#20c997]/15 px-2.5 py-1 text-[11px] font-bold tracking-wide text-[#158765] uppercase transition-colors hover:bg-[#20c997]/25"
-                                >
-                                  <CircleCheckBig className="h-3 w-3" />
-                                  Submitted — view answers
-                                </Link>
-                              ) : lectureLocked ? (
-                                <span className="inline-flex items-center gap-1 text-gray-400">
-                                  <Lock className="h-3 w-3" />
-                                  {lectureQuestions.length} question
-                                  {lectureQuestions.length === 1 ? "" : "s"} —
-                                  open this lecture&apos;s material to unlock
-                                </span>
-                              ) : (
-                                <Link
-                                  href={`/course/${encodeId(emoduleId)}/assignment/${encodeId(section.id)}?lectureId=${encodeId(lecture.id)}`}
-                                  className="inline-flex items-center gap-1.5 rounded bg-[#20c997] px-3 py-1.5 text-[11px] font-bold tracking-wide text-white uppercase transition-colors hover:bg-[#1aa179]"
-                                >
-                                  <CircleCheckBig className="h-3 w-3" />
-                                  {/* An officer cannot sit it — the page opens
-                                      read-only for them — so it must not invite
-                                      them to start one. */}
-                                  {preview ? "View" : "Start"} assignment (
-                                  {lectureQuestions.length} question
-                                  {lectureQuestions.length === 1 ? "" : "s"})
-                                </Link>
-                              )}
-                            </p>
-                          ) : null}
+                          {/* The pre and post links that used to sit here, one
+                              per lecture, are gone. They offered the very same
+                              two papers as the section rows above and below —
+                              a section with one lecture showed each paper
+                              twice, and the second pair sat inside a dropdown
+                              where a learner had to go looking for it. The
+                              section rows are the single way in, which also
+                              makes the post assignment's lock meaningful:
+                              while it was reachable from in here as well, the
+                              gate could simply be walked around. */}
                         </div>
                       ) : null}
                     </div>
                   );
                 })}
 
-                {/* A section-wide assignment link, for a section whose
-                    questions could not be placed under any lecture. */}
-                {section.assignmentStatus === 1 && placedQuestions === 0 ? (
-                  <div className="border-t border-gray-200 px-4 py-2.5">
-                    {sectionSubmitted ? (
-                      <div className="flex items-center gap-3">
-                        <CircleCheckBig className="h-4 w-4 shrink-0 text-[#20c997]" />
-                        <Link
-                          href={`/course/${encodeId(emoduleId)}/assignment/${encodeId(section.id)}`}
-                          className="text-[13px] font-semibold normal-case text-[#158765] underline underline-offset-2 hover:text-[#12705a]"
-                        >
-                          Assignment submitted — view your answers
-                        </Link>
-                      </div>
-                    ) : assignmentLocked ? (
-                      <div className="flex items-center gap-3">
-                        <Lock className="h-4 w-4 shrink-0 text-gray-400" />
-                        <div className="min-w-0">
-                          <p className="text-[13px] font-semibold normal-case text-gray-400">
-                            Assignment — locked
-                          </p>
-                          <p className="text-[12px] normal-case text-[#ffc107]">
-                            Watch the video (and open the material) for every
-                            lecture above to unlock the assignment.
-                          </p>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-3">
-                        <CircleCheckBig className="h-4 w-4 shrink-0 text-[#20c997]" />
-                        <Link
-                          href={`/course/${encodeId(emoduleId)}/assignment/${encodeId(section.id)}`}
-                          className="text-[13px] font-semibold normal-case text-[#3482AE] underline underline-offset-2 hover:text-[#2b6b90]"
-                        >
-                          {preview ? "View assignment" : "Start assignment"}
-                        </Link>
-                      </div>
-                    )}
-                  </div>
-                ) : null}
+                {/* The post assignment, last, after the lectures it
+                    reports on. This is the row's natural home: it is sat once
+                    the content has been worked through, and putting it here
+                    also gives the section a definite end.
+
+                    It is also the one paper that is gated. The post assignment
+                    asks what the lectures taught, so it cannot honestly be sat
+                    before they have been opened — every file read and every
+                    video watched. The pre assignment is deliberately NOT gated:
+                    it is sat first, before any of the content. */}
+                <AssignmentRow
+                  examType={EXAM_TYPES.POST}
+                  questions={papers[EXAM_TYPES.POST]}
+                  submitted={paperDone(EXAM_TYPES.POST)}
+                  href={paperHref(EXAM_TYPES.POST)}
+                  preview={preview}
+                  locked={postLocked}
+                  lockedReason={`open all ${section.lectures.length} lecture${
+                    section.lectures.length === 1 ? "" : "s"
+                  } above to unlock this (${sectionWatched} of ${
+                    section.lectures.length
+                  } done).`}
+                />
+
+                {/* The section-wide link that used to sit here — for a section
+                    whose questions could not be placed under any lecture — is
+                    gone: the two assignment rows cover every section, placed
+                    questions or not. */}
               </div>
             ) : null}
           </div>

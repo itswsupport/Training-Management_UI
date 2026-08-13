@@ -1,19 +1,30 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, Plus, Trash2, X } from "lucide-react";
 
+import ExamTypeToggle from "@/components/course/ExamTypeToggle";
+import useAudienceOptions from "@/hooks/useAudienceOptions";
 import MultiSelect from "@/components/ui/common/MultiSelect";
 import SearchableSelect from "@/components/ui/common/SearchableSelect";
 import YearPicker from "@/components/ui/common/YearPicker";
 import { alerts } from "@/lib/alerts";
 import { apiErrorMessage } from "@/config/api";
 import {
+  DEFAULT_EXAM_TYPE,
+  EXAM_TYPES,
+  EXAM_TYPE_LIST,
+  examTypeLabel,
+  examTypeOf,
+} from "@/lib/examType";
+import { isSafeFileName, sanitizeUpload } from "@/lib/uploadName";
+import {
   QUARTER_OPTIONS,
   currentFinancialYear,
   instructorName,
   isQuarterClosed,
+  plantLabel,
   quarterMeta,
 } from "@/services/MasterDataService";
 import {
@@ -60,7 +71,7 @@ const hasAllowedExtension = (file, extensions) => {
 /** "PDF, Excel, JPG, PNG" — the human list shown in the field's heading. */
 const FILE_LABEL = "PDF, Excel, CSV, JPG, PNG";
 
-const emptyQuestion = () => ({
+const emptyQuestion = (examType = DEFAULT_EXAM_TYPE) => ({
   name: "",
   options: ["", "", "", ""],
   // No option is correct by default — the officer must pick one, otherwise the
@@ -70,6 +81,9 @@ const emptyQuestion = () => ({
   // rather than an id: the lectures have no ids until the section is saved, and
   // they can still be added, removed or renamed before that happens.
   lectureIndex: 0,
+  // Which paper it belongs to — the pre-test or the post-test. Stored as the
+  // row's `quaType`; see lib/examType.
+  examType,
 });
 
 // payroll-ui form styling: bold teal uppercase labels, gray-bordered 12px
@@ -132,18 +146,27 @@ function PickedFile({ file, label, onClear }) {
   if (!file) return null;
 
   return (
-    <p className="mt-1 flex items-center gap-1.5 text-[11px] normal-case text-gray-500">
-      <span className="min-w-0 truncate">{file.name}</span>
-      <button
-        type="button"
-        onClick={onClear}
-        title="Remove this selection"
-        aria-label={`Remove ${label}`}
-        className="shrink-0 cursor-pointer rounded-full p-0.5 text-gray-400 transition hover:bg-[#dc3545]/10 hover:text-[#dc3545]"
-      >
-        <X className="h-3.5 w-3.5" />
-      </button>
-    </p>
+    <>
+      <p className="mt-1 flex items-center gap-1.5 text-[11px] normal-case text-gray-500">
+        <span className="min-w-0 truncate">{file.name}</span>
+        <button
+          type="button"
+          onClick={onClear}
+          title="Remove this selection"
+          aria-label={`Remove ${label}`}
+          className="shrink-0 cursor-pointer rounded-full p-0.5 text-gray-400 transition hover:bg-[#dc3545]/10 hover:text-[#dc3545]"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </p>
+      {/* Said out loud rather than done quietly: the name above is not the one
+          that was picked, and the officer has to be able to see why. */}
+      {file.renamedFrom ? (
+        <p className="mt-0.5 text-[11px] normal-case text-[#a17200]">
+          Special characters removed from “{file.renamedFrom}”.
+        </p>
+      ) : null}
+    </>
   );
 }
 
@@ -187,19 +210,35 @@ function validateSection(section) {
       return `Lecture ${i + 1}: the video must be a video file (${VIDEO_EXTENSIONS.join(", ")}).`;
     if (l.file && !hasAllowedExtension(l.file, FILE_EXTENSIONS))
       return `Lecture ${i + 1}: the file must be one of ${FILE_LABEL}.`;
+    // Names are cleaned as the file is picked, so this only catches one that
+    // reached the section some other way. It matters because the backend both
+    // stores and looks the material up by its name — a special character in
+    // one is a file that uploads and then cannot be opened again.
+    for (const [kind, upload] of [["video", l.video], ["file", l.file]]) {
+      if (upload && !isSafeFileName(upload.name)) {
+        return `Lecture ${i + 1}: the ${kind} name "${upload.name}" has special characters in it. Re-attach it, or rename the file to letters, digits, dots, dashes and underscores only.`;
+      }
+    }
   }
-  for (let i = 0; i < section.questions.length; i += 1) {
-    const q = section.questions[i];
-    if (!q.name.trim()) return `Assignment question ${i + 1} needs text.`;
-    if (q.options.some((o) => !o.trim()))
-      return `Assignment question ${i + 1} needs all four options.`;
-    // The correct answer is the grading key — it must be chosen deliberately.
-    if (!q.answer)
-      return `Assignment question ${i + 1}: mark the correct option (click the radio next to it).`;
-    // A lecture removed after the question was written leaves it pointing at
-    // nothing, which would save the question against the wrong lecture.
-    if ((q.lectureIndex ?? 0) >= section.lectures.length)
-      return `Assignment question ${i + 1}: pick the lecture it belongs to.`;
+  // Each paper is numbered on its own, the same way the cards on screen are —
+  // "post assignment question 2" has to point at the second card of the post
+  // tab, not the second question of the section.
+  for (const type of EXAM_TYPE_LIST) {
+    const paper = section.questions.filter((q) => examTypeOf(q) === type.value);
+    for (let i = 0; i < paper.length; i += 1) {
+      const q = paper[i];
+      const label = `${examTypeLabel(type.value)} question ${i + 1}`;
+      if (!q.name.trim()) return `${label} needs text.`;
+      if (q.options.some((o) => !o.trim()))
+        return `${label} needs all four options.`;
+      // The correct answer is the grading key — it must be chosen deliberately.
+      if (!q.answer)
+        return `${label}: mark the correct option (click the radio next to it).`;
+      // A lecture removed after the question was written leaves it pointing at
+      // nothing, which would save the question against the wrong lecture.
+      if ((q.lectureIndex ?? 0) >= section.lectures.length)
+        return `${label}: pick the lecture it belongs to.`;
+    }
   }
   return null;
 }
@@ -231,15 +270,42 @@ function trimSection(section) {
 function SectionFields({ section, onChange, idPrefix }) {
   const { lectures, questions } = section;
 
+  /**
+   * Which paper each lecture's block is showing, by lecture position.
+   *
+   * Local to the editor and never written into the section: switching tabs is
+   * looking, not editing, and it must not change what gets saved. Anything not
+   * in here is on the pre paper, which is where a block opens.
+   */
+  const [openPaper, setOpenPaper] = useState({});
+  const paperFor = (lectureIndex) =>
+    openPaper[lectureIndex] ?? DEFAULT_EXAM_TYPE;
+
   const updateLecture = (i, patch) =>
     onChange({ lectures: lectures.map((l, j) => (j === i ? { ...l, ...patch } : l)) });
 
   const updateQuestion = (i, patch) =>
     onChange({ questions: questions.map((q, j) => (j === i ? { ...q, ...patch } : q)) });
 
-  /** The questions written against one lecture, by its position in the list. */
-  const questionsFor = (lectureIndex) =>
-    questions.filter((q) => (q.lectureIndex ?? 0) === lectureIndex);
+  /**
+   * The questions written against one lecture, by its position in the list —
+   * narrowed to one paper when a type is given.
+   */
+  const questionsFor = (lectureIndex, examType = null) =>
+    questions.filter(
+      (q) =>
+        (q.lectureIndex ?? 0) === lectureIndex &&
+        (examType === null || examTypeOf(q) === examType)
+    );
+
+  /** How many questions each paper of one lecture holds, for the toggle. */
+  const paperCounts = (lectureIndex) =>
+    Object.fromEntries(
+      EXAM_TYPE_LIST.map((t) => [
+        t.value,
+        questionsFor(lectureIndex, t.value).length,
+      ])
+    );
 
   /** Questions left pointing past the end of the list by a deleted lecture. */
   const orphanQuestions = questions.filter(
@@ -313,7 +379,9 @@ function SectionFields({ section, onChange, idPrefix }) {
                       type="file"
                       accept={VIDEO_ACCEPT}
                       onChange={(e) =>
-                        updateLecture(i, { video: e.target.files?.[0] ?? null })
+                        updateLecture(i, {
+                          video: sanitizeUpload(e.target.files?.[0] ?? null),
+                        })
                       }
                       className={fileInputCls}
                     />
@@ -335,7 +403,9 @@ function SectionFields({ section, onChange, idPrefix }) {
                       type="file"
                       accept={FILE_ACCEPT}
                       onChange={(e) =>
-                        updateLecture(i, { file: e.target.files?.[0] ?? null })
+                        updateLecture(i, {
+                          file: sanitizeUpload(e.target.files?.[0] ?? null),
+                        })
                       }
                       className={fileInputCls}
                     />
@@ -363,36 +433,65 @@ function SectionFields({ section, onChange, idPrefix }) {
               </div>
 
               {/* This lecture's questions sit with it, so the section reads
-                  lecture 1, its assignment, lecture 2, its assignment. */}
-              <div className="mt-4 border-t border-gray-200 pt-3">
-                <div className="mb-2 flex items-center justify-between">
-                  <span className="text-[11px] font-bold tracking-wide text-[#3482AE] uppercase">
-                    Assignment — Lecture {i + 1}
-                  </span>
-                  <span className="text-[11px] text-gray-500">
-                    {questionsFor(i).length} question(s)
-                  </span>
-                </div>
+                  lecture 1, its assignment, lecture 2, its assignment. The two
+                  papers — pre and post — share this block and are switched
+                  between rather than stacked: they hold the same kind of card,
+                  and showing both at once doubled an already long lecture. */}
+              {(() => {
+                const paper = paperFor(i);
+                const shown = questionsFor(i, paper);
 
-                <div className="space-y-3">
-                  {questionsFor(i).map((q) => renderQuestion(q, questions.indexOf(q)))}
-                </div>
+                return (
+                  <div className="mt-4 border-t border-gray-200 pt-3">
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+                      <span className="text-[11px] font-bold tracking-wide text-[#3482AE] uppercase">
+                        Assignment — Lecture {i + 1}
+                      </span>
+                      <ExamTypeToggle
+                        value={paper}
+                        counts={paperCounts(i)}
+                        onChange={(type) =>
+                          setOpenPaper((prev) => ({ ...prev, [i]: type }))
+                        }
+                      />
+                    </div>
 
-                <button
-                  type="button"
-                  onClick={() =>
-                    onChange({
-                      questions: [
-                        ...questions,
-                        { ...emptyQuestion(), lectureIndex: i },
-                      ],
-                    })
-                  }
-                  className={`mt-3 ${addQuestionCls}`}
-                >
-                  <Plus className="h-3.5 w-3.5" /> Add Question
-                </button>
-              </div>
+                    <div className="space-y-3">
+                      {shown.length === 0 ? (
+                        <p className="text-[11px] normal-case text-gray-500">
+                          No {examTypeLabel(paper).toLowerCase()} questions for
+                          this lecture yet.
+                        </p>
+                      ) : (
+                        // `qi` numbers within THIS paper; the second argument is
+                        // the question's index in the section, which is what an
+                        // edit or a removal has to act on.
+                        shown.map((q, qi) =>
+                          renderQuestion(q, questions.indexOf(q), qi)
+                        )
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onChange({
+                          questions: [
+                            ...questions,
+                            // Onto the paper that is open, so the button always
+                            // adds to what the officer is looking at.
+                            { ...emptyQuestion(paper), lectureIndex: i },
+                          ],
+                        })
+                      }
+                      className={`mt-3 ${addQuestionCls}`}
+                    >
+                      <Plus className="h-3.5 w-3.5" /> Add{" "}
+                      {examTypeLabel(paper)} Question
+                    </button>
+                  </div>
+                );
+              })()}
             </div>
           ))}
         </div>
@@ -414,19 +513,42 @@ function SectionFields({ section, onChange, idPrefix }) {
             <span className={groupLabelCls}>QUESTIONS NEEDING A LECTURE</span>
           </div>
           <div className="space-y-3">
-            {orphanQuestions.map((q) => renderQuestion(q, questions.indexOf(q)))}
+            {orphanQuestions.map((q, oi) =>
+              renderQuestion(q, questions.indexOf(q), oi)
+            )}
           </div>
         </div>
       ) : null}
     </div>
   );
 
-  function renderQuestion(q, qi) {
+  /**
+   * @param {number} qi the question's index in the whole section — what an edit
+   *   or a removal acts on
+   * @param {number} [shownIndex] its position within the paper it is shown
+   *   under, which is how the card is numbered
+   */
+  function renderQuestion(q, qi, shownIndex = qi) {
+    const paper = examTypeOf(q);
     return (
             <div key={qi} className="rounded border border-gray-200 bg-[#f8f9fa] p-4">
               <div className="mb-3 flex items-center justify-between">
-                <span className="text-[12px] font-bold tracking-wide text-gray-600 uppercase">
-                  Question {qi + 1}
+                <span className="flex items-center gap-2">
+                  <span className="text-[12px] font-bold tracking-wide text-gray-600 uppercase">
+                    Question {shownIndex + 1}
+                  </span>
+                  {/* Which paper this card belongs to. Redundant under the
+                      toggle, which already says it — but the orphan list below
+                      mixes both, and a question there has no other clue. */}
+                  <span
+                    className={`rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide uppercase ${
+                      paper === EXAM_TYPES.POST
+                        ? "bg-[#ffc107]/20 text-[#8a6100]"
+                        : "bg-[#3482AE]/10 text-[#2a6a8f]"
+                    }`}
+                  >
+                    {examTypeLabel(paper)}
+                  </span>
                 </span>
                 <button
                   type="button"
@@ -434,7 +556,7 @@ function SectionFields({ section, onChange, idPrefix }) {
                     onChange({ questions: questions.filter((_, j) => j !== qi) })
                   }
                   className={removeBtnCls}
-                  aria-label={`Remove question ${qi + 1}`}
+                  aria-label={`Remove ${examTypeLabel(paper).toLowerCase()} question ${shownIndex + 1}`}
                 >
                   <Trash2 className="h-3 w-3" /> Remove
                 </button>
@@ -446,7 +568,7 @@ function SectionFields({ section, onChange, idPrefix }) {
                   <input
                     value={q.name}
                     onChange={(e) => updateQuestion(qi, { name: e.target.value })}
-                    placeholder={`Question ${qi + 1}`}
+                    placeholder={`Question ${shownIndex + 1}`}
                     className={inputCls}
                   />
                 </div>
@@ -546,8 +668,14 @@ function SectionRow({ index, section, onChange }) {
         >
           <span className="min-w-0">
             <strong className="text-gray-800">{section.name}</strong>
+            {/* Both papers are counted, so a section whose post-test is still
+                empty says so from the collapsed row. */}
             <span className="ml-2 text-gray-500">
-              {section.lectures.length} lecture(s) · {section.questions.length}{" "}
+              {section.lectures.length} lecture(s) ·{" "}
+              {EXAM_TYPE_LIST.map(
+                (t) =>
+                  `${section.questions.filter((q) => examTypeOf(q) === t.value).length} ${t.short.toLowerCase()}`
+              ).join(" · ")}{" "}
               question(s)
             </span>
           </span>
@@ -699,9 +827,78 @@ export default function ModuleForm({
     ? quarter
     : (quarterChoices[0]?.value ?? "");
   const [objectives, setObjectives] = useState([""]);
+  const [plantIds, setPlantIds] = useState([]);
   const [deptIds, setDeptIds] = useState([]);
   const [gradeIds, setGradeIds] = useState([]);
+  const [empCodes, setEmpCodes] = useState([]);
   const [sections, setSections] = useState([]);
+
+  /**
+   * The departments to offer for the chosen plants, and the people the three
+   * filters above SELECT USER currently resolve to. Shared with the officer's
+   * edit form, which narrows the same four filters the same way.
+   */
+  const { departments, audienceOptions, audienceLoading } = useAudienceOptions({
+    allDepartments: options.departments,
+    plantIds,
+    deptIds,
+    gradeIds,
+    setDeptIds,
+    setEmpCodes,
+  });
+
+  /**
+   * The audience chain, one field at a time: PLANT → DEPARTMENT → GRADE →
+   * SELECT USER. Each stays shut until the one above it is answered, so the
+   * officer narrows in the order the filters actually narrow — site, then
+   * function, then seniority, then named people — rather than picking grades
+   * out of the whole company and departments out of all 64 before saying which
+   * site they mean.
+   *
+   * The first gate is guarded on the plant list actually having plants in it,
+   * not on the selection alone: `/plant/list` is newer than the other masters
+   * and comes back empty against a backend that predates it. Gating on an empty
+   * field there would leave an officer unable to pick a plant, therefore unable
+   * to pick a department, and unable to raise a course at all — so where there
+   * are no plants to choose, the chain simply starts at DEPARTMENT.
+   */
+  const deptLocked = options.plants.length > 0 && plantIds.length === 0;
+  const gradeLocked = deptLocked || deptIds.length === 0;
+  const userLocked = gradeLocked || gradeIds.length === 0;
+
+  /**
+   * Clearing a field clears everything chosen below it.
+   *
+   * Those fields are about to grey out, and a disabled field still holding
+   * three departments is a selection the officer can no longer see the basis
+   * for or take back — and it would still be saved. So emptying one link of the
+   * chain empties the rest of it.
+   *
+   * This is only the case the officer causes directly. `useAudienceOptions`
+   * separately prunes picks that a *narrowed* filter no longer offers, which is
+   * a different question and already has its own answer.
+   */
+  const changePlants = (next) => {
+    setPlantIds(next);
+    if (next.length === 0) {
+      setDeptIds([]);
+      setGradeIds([]);
+      setEmpCodes([]);
+    }
+  };
+
+  const changeDepts = (next) => {
+    setDeptIds(next);
+    if (next.length === 0) {
+      setGradeIds([]);
+      setEmpCodes([]);
+    }
+  };
+
+  const changeGrades = (next) => {
+    setGradeIds(next);
+    if (next.length === 0) setEmpCodes([]);
+  };
 
   const [modalOpen, setModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -721,16 +918,28 @@ export default function ModuleForm({
     if (!name.trim()) return reject("Please enter the course name.");
     if (!author.trim()) return reject("Please select the course instructor.");
     if (!description.trim()) return reject("Please enter the course description.");
+    // Down the chain in order, so the officer is always sent to the field that
+    // is actually open: with no plant chosen DEPARTMENT is greyed out, and
+    // being told to select a department would point at a field they cannot use.
+    if (deptLocked) return reject("Please select at least one plant.");
     if (deptIds.length === 0) return reject("Please select at least one department.");
     if (gradeIds.length === 0) return reject("Please select at least one grade.");
     if (sections.length === 0)
       return reject("Please add at least one section before submitting.");
 
-    // The backend rejects submit unless the module has >= 1 assignment question.
-    const totalQuestions = sections.reduce((n, s) => n + s.questions.length, 0);
-    if (totalQuestions === 0)
+    // The backend rejects submit unless the module has >= 1 assignment
+    // question. Whether it counts both papers or only the pre-test is not
+    // knowable from here, and a post-only module has nothing a learner can sit
+    // anyway — the course screen reads the pre paper — so one PRE question is
+    // required rather than one of either kind.
+    const preQuestions = sections.reduce(
+      (n, s) =>
+        n + s.questions.filter((q) => examTypeOf(q) === EXAM_TYPES.PRE).length,
+      0
+    );
+    if (preQuestions === 0)
       return reject(
-        "Please add at least one assignment question (open a section → Assignment)."
+        "Please add at least one pre assignment question (open a section → Assignment → Pre Assignment)."
       );
 
     setSubmitting(true);
@@ -749,8 +958,10 @@ export default function ModuleForm({
         kraQuarter,
         validTill,
         objectives: objectives.map((o) => o.trim()).filter(Boolean),
+        plantIds,
         deptIds,
         gradeIds,
+        empCodes,
         regBy: empCode,
       });
 
@@ -785,6 +996,7 @@ export default function ModuleForm({
             options: q.options,
             answer: q.answer,
             regBy: empCode,
+            examType: examTypeOf(q),
           });
         }
       }
@@ -793,8 +1005,10 @@ export default function ModuleForm({
       await submitModule({
         emoduleId,
         regards: officerName,
+        plantIds,
         deptIds,
         gradeIds,
+        empCodes,
       });
 
       await alerts.success("Training module submitted successfully.");
@@ -836,6 +1050,9 @@ export default function ModuleForm({
               onChange={setCategoryId}
               placeholder="- Select Category -"
               searchPlaceholder="Search category…"
+              // Both this and the instructor below can be taken back off: a
+              // wrong pick had no way out except picking another one.
+              clearable
             />
           </Field>
 
@@ -849,6 +1066,7 @@ export default function ModuleForm({
               onChange={setAuthor}
               placeholder="- Select Instructor -"
               searchPlaceholder="Search instructor…"
+              clearable
             />
           </Field>
 
@@ -862,16 +1080,60 @@ export default function ModuleForm({
             />
           </Field>
 
+          {/* Plant, Department and Grade are the three filters that decide who
+              the course reaches, so they sit together on one row in the order
+              they narrow by: site, then function, then seniority.
+
+              The order is now enforced rather than merely suggested: DEPARTMENT
+              stays shut until a plant is picked. It is the same rule SELECT USER
+              already applies one step down the chain, and it stops the officer
+              choosing from all 64 departments — most of which are not staffed at
+              the site they have in mind — before saying which site that is. */}
+          <Field label="PLANT:">
+            <MultiSelect
+              // The code leads the label: it is what the plants are known by
+              // on paper, and it is the only short way to tell "Unit-4
+              // Toolroom" from "Unit-4 R&D" and "Unit-4, PressShop" at a
+              // glance. It is searchable too, so "1042" finds the right one.
+              options={options.plants.map((p) => ({
+                value: String(p.id),
+                label: plantLabel(p),
+              }))}
+              selected={plantIds}
+              onChange={changePlants}
+              placeholder="Select plant(s)"
+              searchPlaceholder="Search plant name or code…"
+              allLabel="All plants"
+            />
+          </Field>
+
           <Field label="DEPARTMENT:">
             <MultiSelect
-              options={options.departments.map((d) => ({
+              // Plant-wise: once a plant is chosen this lists only the
+              // departments actually staffed there, so the officer is not
+              // picking from 64 when 25 of them exist at that site.
+              options={departments.map((d) => ({
                 value: String(d.id),
                 label: d.name,
               }))}
               selected={deptIds}
-              onChange={setDeptIds}
-              placeholder="Select department(s)"
+              onChange={changeDepts}
+              disabled={deptLocked}
+              // A greyed field has to say what would open it, or it reads as
+              // broken — the same job the empty SELECT USER does below.
+              placeholder={
+                deptLocked
+                  ? "Select plant first"
+                  : plantIds.length > 0
+                    ? "Select department(s) at these plants"
+                    : "Select department(s)"
+              }
               searchPlaceholder="Search department…"
+              allLabel={
+                plantIds.length > 0
+                  ? "All departments at these plants"
+                  : "All departments"
+              }
             />
           </Field>
 
@@ -882,36 +1144,105 @@ export default function ModuleForm({
                 label: g.label,
               }))}
               selected={gradeIds}
-              onChange={setGradeIds}
-              placeholder="Select grade(s)"
+              onChange={changeGrades}
+              disabled={gradeLocked}
+              placeholder={
+                gradeLocked ? "Select department first" : "Select grade(s)"
+              }
               searchPlaceholder="Search grade…"
+              // Ticking this reaches the same people as the master's own "All
+              // Grade" row: every serving employee is on a grade between M7 and
+              // S1, so selecting all of them leaves nobody out. Both ways of
+              // saying it are therefore offered rather than one being removed —
+              // "All Grade" is what courses raised before this were stored with.
+              allLabel="All grades"
             />
           </Field>
 
-          {/* Year, quarter and objective share the last row. The outer grid is
-              three equal columns and cannot express "narrow, narrow, wide", so
-              this row runs its own twelve-column grid: the two dropdowns hold
-              one short value each and the objective is free text that grows a
-              line per entry, and so takes the rest.
+          {/* Select User comes last because it is the final narrowing of the
+              three above it: plant picks the sites, department the functions,
+              grade the seniorities, and this picks named people out of whoever
+              is left. Leaving it empty keeps all of them.
+
+              One column, like every other field on this row. It was two wide
+              to give the employee labels room — they carry the code as well as
+              the name — but that made it the odd one out on a form whose whole
+              grid is otherwise even, and the badges inside it truncate rather
+              than overflow anyway. */}
+          <Field label="SELECT USER:">
+            <MultiSelect
+              // The code alone. Names carry the code as well, and a badge of
+              // "MANIKUTTAN NAIR (100098)" truncated inside a one-column field
+              // showed neither the whole name nor the code — which is the one
+              // part of it that identifies the person. The name is still what
+              // typing searches, and it is on the row's hover title.
+              options={audienceOptions.map((e) => ({
+                value: e.code,
+                label: e.code,
+                search: e.label,
+              }))}
+              selected={empCodes}
+              onChange={setEmpCodes}
+              disabled={userLocked}
+              // The empty field is the one that has to explain itself: it
+              // reads as broken otherwise, and the reason differs — which link
+              // of the chain is missing, or that the three above it resolve to
+              // nobody. Kept short enough to fit the narrower field without
+              // clipping.
+              placeholder={
+                deptLocked
+                  ? "Select plant first"
+                  : deptIds.length === 0
+                    ? "Select department first"
+                    : gradeIds.length === 0
+                      ? "Select grade first"
+                      : audienceLoading
+                        ? "Loading employees…"
+                        : audienceOptions.length === 0
+                          ? "No matching employees"
+                          : `All ${audienceOptions.length} employee${
+                              audienceOptions.length === 1 ? "" : "s"
+                            }`
+              }
+              searchPlaceholder="Search employee name or code…"
+              allLabel={
+                audienceOptions.length > 0
+                  ? `All ${audienceOptions.length} employees`
+                  : ""
+              }
+            />
+          </Field>
+
+          {/* Financial year rides up into the main grid rather than heading the
+              last row. Making USER one column wide left the third cell of its
+              row empty, and a hole in an otherwise even grid reads as a field
+              that failed to render. It also puts the year beside the audience
+              filters, which is where the officer is already looking. */}
+          <Field label="FINANCIAL YEAR:">
+            <YearPicker
+              label=""
+              value={financialYear}
+              onChange={setFinancialYear}
+              allowAll={false}
+              minYear={earliestYear}
+              triggerClassName={inputCls}
+            />
+          </Field>
+
+          {/* Quarter and objective take the last row. The outer grid is three
+              equal columns and cannot express "narrow, wide", so this row runs
+              its own twelve-column grid: the dropdown holds one short value and
+              the objective is free text that grows a line per entry, and so
+              takes the rest.
 
               items-start, not the grid's stretch: a cell that stretches makes
               its field as tall as the tallest column, so adding a second
-              objective grew the year and quarter boxes to match it. Each field
-              now keeps its own height and the three labels stay on one line. */}
-          <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-12 items-start gap-x-6 gap-y-4">
-            <div className="md:col-span-3">
-              <Field label="FINANCIAL YEAR:">
-                <YearPicker
-                  label=""
-                  value={financialYear}
-                  onChange={setFinancialYear}
-                  allowAll={false}
-                  minYear={earliestYear}
-                  triggerClassName={inputCls}
-                />
-              </Field>
-            </div>
+              objective grew the quarter box to match it. Each field keeps its
+              own height and both labels stay on one line.
 
+              The quarter still follows the year immediately in reading order,
+              which matters — the quarters on offer depend on the year chosen. */}
+          <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-12 items-start gap-x-6 gap-y-4">
             <div className="md:col-span-3">
               <Field label="APPLICABLE QUARTER:">
                 <SearchableSelect
@@ -924,7 +1255,7 @@ export default function ModuleForm({
               </Field>
             </div>
 
-            <div className="md:col-span-6">
+            <div className="md:col-span-9">
               <span className={labelCls}>LEARNING OBJECTIVE:</span>
               <div className="space-y-2">
                 {objectives.map((obj, i) => (

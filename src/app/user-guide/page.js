@@ -200,7 +200,7 @@ export default function UserGuidePage() {
             className="mx-auto mt-4 block h-1 w-24 rounded-full bg-[linear-gradient(90deg,#ffc107_0%,#20c997_100%)]"
           />
           <p className="mx-auto mt-5 max-w-xl text-[15px] leading-[1.8] normal-case text-white/90">
-            How to work through your training, watch the lectures, sit the
+            How to work through your training, watch the lectures, complete the
             assignments and collect your certificate.
           </p>
           <a

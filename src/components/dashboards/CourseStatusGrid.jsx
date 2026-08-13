@@ -80,19 +80,50 @@ export default function CourseStatusGrid({
       { accessorKey: "empName", header: "EMPLOYEE NAME" },
       { accessorKey: "designation", header: "DESIGNATION" },
       { accessorKey: "course", header: "COURSE" },
-      // The year on its own, ahead of the span it belongs to. KRA QUARTER
-      // carries the same year inside its dates, but buried in prose the eye has
-      // to parse — and for quarter 4 the dates read as the NEXT calendar year,
-      // so the column beside it is the only place the financial year is stated
-      // plainly. Derived the same way the filter above matches, so the two can
-      // never disagree.
+      // The year on its own, ahead of the span it belongs to — the pair's own
+      // order in the filter bar above and in ALL MODULES, so the officer reads
+      // year then quarter wherever they are.
+      //
+      // Not redundant with KRA QUARTER. That column carries the year inside its
+      // dates ("1 [ 2026-04-01 to 2026-06-30 ]"), but buried in prose the eye
+      // has to parse — and for quarter 4 those dates read as the NEXT calendar
+      // year, so this is the only place the financial year is stated plainly.
+      // It is also the value the filter above actually matches on, derived the
+      // same way, so a filtered report says what it is filtered to and the two
+      // can never disagree.
+      //
+      // Older courses carry no quarter at all, hence the dash rather than a
+      // guess — the same fallback ALL MODULES uses.
       {
         id: "financialYear",
-        header: "YEAR",
+        // "FINANCIAL YEAR", as on ALL MODULES and COMPLETED COURSES. The bare
+        // "YEAR" this briefly carried made this grid the only one of the four
+        // naming the column differently, for a value they all take from the
+        // same field.
+        header: "FINANCIAL YEAR",
         accessorFn: (row) => row.financialYear || "",
         Cell: ({ row }) => row.original.financialYear || "—",
       },
       { accessorKey: "kraQuarter", header: "KRA QUARTER" },
+      // What each paper was scored, side by side, so an officer can see the two
+      // together — the whole point of a pre and a post assignment is the
+      // difference between them, and a grade alone does not show it. Sorted
+      // numerically off the raw value; a paper not sat reads as a dash rather
+      // than as a zero, which is a real score someone could have got.
+      ...["pre", "post"].map((paper) => ({
+        id: `${paper}Marks`,
+        header: `${paper.toUpperCase()}-ASSIGNMENT MARKS`,
+        accessorFn: (row) => row[`${paper}Marks`] ?? null,
+        sortUndefined: "last",
+        Cell: ({ row }) => {
+          const marks = row.original[`${paper}Marks`];
+          return marks == null ? (
+            <Box sx={{ fontFamily: "Exo", fontSize: "12px", color: "#6b7280" }}>-</Box>
+          ) : (
+            marks
+          );
+        },
+      })),
       { accessorKey: "grade", header: "GRADE" },
       {
         accessorKey: "feedback",
@@ -148,8 +179,10 @@ export default function CourseStatusGrid({
       "EMPLOYEE NAME": item.empName,
       DESIGNATION: item.designation,
       COURSE: item.course,
-      YEAR: item.financialYear || "",
+      "FINANCIAL YEAR": item.financialYear || "",
       "KRA QUARTER": item.kraQuarter,
+      "PRE-ASSIGNMENT MARKS": item.preMarks ?? "-",
+      "POST-ASSIGNMENT MARKS": item.postMarks ?? "-",
       GRADE: item.grade,
       STATUS: getCourseStatusConfig(item.status).text,
     }));

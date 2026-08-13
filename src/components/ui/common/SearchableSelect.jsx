@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Search } from "lucide-react";
+import { Search, X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -13,6 +13,10 @@ import { cn } from "@/lib/utils";
  * a name is impractical. Styled to match the form's other controls.
  *
  * @param {{value: string, label: string}[]} options
+ * @param {boolean} [clearable] shows an X on the chosen value that puts the
+ *   field back to nothing. Off by default: on a field that must hold a value —
+ *   the applicable quarter, say — an empty state is not a legal answer, and
+ *   offering one only invites a form that cannot be submitted.
  */
 export default function SearchableSelect({
   options = [],
@@ -20,6 +24,7 @@ export default function SearchableSelect({
   onChange,
   placeholder = "- Select -",
   searchPlaceholder = "Type to search…",
+  clearable = false,
   disabled,
   id,
   className,
@@ -82,28 +87,72 @@ export default function SearchableSelect({
     }
   };
 
+  const showClear = clearable && !disabled && Boolean(selected);
+
   return (
     <div className={cn("relative", className)} ref={ref}>
-      <button
-        type="button"
+      {/* A div rather than a button, for the same reason MultiSelect is one:
+          the chosen value carries its own × and a <button> cannot legally hold
+          another button. role, tabIndex and the key handler give back what the
+          button provided. */}
+      <div
+        role="button"
         id={id}
-        disabled={disabled}
-        onClick={toggleOpen}
+        tabIndex={disabled ? -1 : 0}
+        onClick={disabled ? undefined : toggleOpen}
+        onKeyDown={(e) => {
+          // Only when the field itself has focus — Enter on the badge's × is
+          // that button's to handle and must not also open the list.
+          if (disabled || e.target !== e.currentTarget) return;
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            toggleOpen();
+          }
+        }}
         aria-haspopup="listbox"
         aria-expanded={open}
-        className="flex w-full cursor-pointer items-center justify-between gap-2 rounded border border-gray-300 bg-white px-2 py-1.5 text-left text-[12px] outline-none transition-colors focus:border-[#3482AE] focus:ring-2 focus:ring-[#3482AE]/30 disabled:cursor-not-allowed disabled:bg-gray-100"
+        aria-disabled={disabled || undefined}
+        className={cn(
+          "flex w-full items-center justify-between gap-2 rounded border border-gray-300 bg-white px-2 py-1.5 text-left text-[12px] outline-none transition-colors focus:border-[#3482AE] focus:ring-2 focus:ring-[#3482AE]/30",
+          disabled ? "cursor-not-allowed bg-gray-100" : "cursor-pointer"
+        )}
       >
         {/* The chosen value reads as a badge, matching the multi-selects it
-            sits beside on the module form. */}
+            sits beside on the module form — and, when the field is clearable,
+            carrying its × in the same place theirs do. */}
         {selected ? (
-          <span className="min-w-0 truncate rounded-full bg-[#3482AE]/10 px-2.5 py-1 text-[11px] font-semibold text-[#2a6a8f] ring-1 ring-[#3482AE]/20">
-            {selected.label}
+          <span
+            className={cn(
+              "flex min-w-0 items-center gap-1 rounded-full bg-[#3482AE]/10 py-1 text-[11px] font-semibold text-[#2a6a8f] ring-1 ring-[#3482AE]/20",
+              showClear ? "pr-1 pl-2.5" : "px-2.5"
+            )}
+          >
+            <span className="truncate">{selected.label}</span>
+            {/* stopPropagation is the whole trick: the × sits inside the field,
+                and the click would otherwise bubble up and toggle the dropdown
+                on its way out — so clearing would leave the list hanging open. */}
+            {showClear ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onChange("");
+                  setOpen(false);
+                }}
+                onKeyDown={(e) => e.stopPropagation()}
+                title={`Remove ${selected.label}`}
+                aria-label={`Remove ${selected.label}`}
+                className="shrink-0 cursor-pointer rounded-full p-0.5 text-[#2a6a8f]/60 transition hover:bg-[#3482AE]/25 hover:text-[#1f5f86]"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            ) : null}
           </span>
         ) : (
           <span className="truncate text-gray-400">{placeholder}</span>
         )}
         <span className="shrink-0 text-gray-400">▾</span>
-      </button>
+      </div>
 
       {open ? (
         <div className="absolute z-40 mt-1 w-full rounded border border-gray-300 bg-white shadow-lg">

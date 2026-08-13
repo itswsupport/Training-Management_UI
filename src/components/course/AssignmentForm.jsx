@@ -7,6 +7,8 @@ import { alerts } from "@/lib/alerts";
 import { apiErrorMessage } from "@/config/api";
 import { encodeId } from "@/lib/courseId";
 import { grantCourseAccess } from "@/lib/courseGrant";
+import { rememberScore, scoreLine } from "@/lib/assignmentScore";
+import { DEFAULT_EXAM_TYPE, examTypeLabel } from "@/lib/examType";
 import { saveAnswer, submitAssignment } from "@/services/AssignmentService";
 
 const OPTION_LETTERS = ["A", "B", "C", "D"];
@@ -26,14 +28,14 @@ const CANCEL_BTN =
  * and lock themselves out of the rest. The set is kept per browser, the same
  * way the watched-lecture ticks are.
  */
-const answeredKey = (empCode, emoduleId, sectionId) =>
-  `etms:answered:${empCode || "anon"}:${emoduleId}:${sectionId}`;
+const answeredKey = (empCode, emoduleId, sectionId, examType, attempt) =>
+  `etms:answered:${empCode || "anon"}:${emoduleId}:${sectionId}:${examType}:${attempt}`;
 
-function readAnswered(empCode, emoduleId, sectionId) {
+function readAnswered(empCode, emoduleId, sectionId, examType, attempt) {
   if (typeof window === "undefined") return new Set();
   try {
     const raw = window.localStorage.getItem(
-      answeredKey(empCode, emoduleId, sectionId)
+      answeredKey(empCode, emoduleId, sectionId, examType, attempt)
     );
     const parsed = raw ? JSON.parse(raw) : [];
     return new Set(Array.isArray(parsed) ? parsed : []);
@@ -44,26 +46,29 @@ function readAnswered(empCode, emoduleId, sectionId) {
 
 /**
  * @param {boolean} [readOnly] a training officer checking the paper
- * @param {boolean} [submitted] the learner looking back at a paper they have
- *   already sat — the same inert form, but their own answers are filled in
+ * @param {boolean} [submitted] this paper has already been handed in. The form
+ *   still renders — with the answers given, and nothing clickable — so a
+ *   learner can read back what they answered.
+ * @param {Object<string, string>} [savedAnswers] `{questionId: answer}` as
+ *   already submitted, which is what a paper in that state opens with
  * @param {boolean} [overdue] the course's quarter has lapsed; the paper can be
  *   read but no longer answered or submitted
- * @param {Object<string, string>} [initialAnswers] what they answered, keyed by
- *   question id
  */
 export default function AssignmentForm({
   emoduleId,
   sectionId,
   empCode,
   courseName,
+  examType = DEFAULT_EXAM_TYPE,
   questions,
   allQuestions,
   lectureNames = {},
   lectureName = "",
   readOnly = false,
   submitted = false,
+  savedAnswers = null,
   overdue = false,
-  initialAnswers = null,
+  attempt = 0,
 }) {
   const router = useRouter();
 
@@ -75,9 +80,21 @@ export default function AssignmentForm({
   // quarter has closed.
   const inert = readOnly || submitted || overdue;
 
-  const [answers, setAnswers] = useState(() => initialAnswers ?? {});
+  /**
+   * A paper already handed in opens with its own answers marked; one being sat
+   * opens blank.
+   *
+   * Only for a paper that is finished. Restoring a half-answered one would put
+   * ticks against questions the learner is still working through, and the count
+   * behind the SUBMIT button reads this — it would report the section as
+   * answered when the answers came from the server rather than from this
+   * sitting. `answeredBefore` below is what tracks that case.
+   */
+  const [answers, setAnswers] = useState(() =>
+    submitted && savedAnswers ? { ...savedAnswers } : {}
+  );
   const [answeredBefore, setAnsweredBefore] = useState(() =>
-    readAnswered(empCode, emoduleId, sectionId)
+    readAnswered(empCode, emoduleId, sectionId, examType, attempt)
   );
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -103,7 +120,7 @@ export default function AssignmentForm({
       if (typeof window !== "undefined") {
         try {
           window.localStorage.setItem(
-            answeredKey(empCode, emoduleId, sectionId),
+            answeredKey(empCode, emoduleId, sectionId, examType, attempt),
             JSON.stringify([...next])
           );
         } catch {
@@ -136,7 +153,14 @@ export default function AssignmentForm({
 
     queue.current = queue.current.then(async () => {
       try {
-        await saveAnswer({ emoduleId, sectionId, questionId, answer, empCode });
+        await saveAnswer({
+          emoduleId,
+          sectionId,
+          questionId,
+          answer,
+          empCode,
+          examType,
+        });
         rememberAnswered(questionId);
       } catch (err) {
         setAnswers((prev) => {
@@ -184,23 +208,50 @@ export default function AssignmentForm({
       // Let any in-flight answer land first — /exam_marks only stamps the
       // attempt as done and reads back the running total.
       await queue.current;
-      const result = await submitAssignment({ emoduleId, sectionId, empCode });
+      const result = await submitAssignment({
+        emoduleId,
+        sectionId,
+        empCode,
+        examType,
+      });
 
-      // Marks are intentionally NOT shown to the employee — only that it went
-      // in. The dialog is awaited, so the learner reads it before the page
+      // The score, which `/exam_marks` returns and this screen used to throw
+      // away. It is the whole section's running total — the backend re-scores
+      // the attempt on every saved answer — so it is reported out of every
+      // question in the section, not just the lecture that was on screen.
+      const paperLabel = examTypeLabel(examType);
+      const total = sectionQuestions.length;
+      const score = scoreLine({ marks: result.marks, total });
+
+      // Kept because this is the only moment the score is readable: the alert
+      // below is the last time the paper is shown at all, and reopening a
+      // submitted assignment reports the score from here rather than sitting
+      // it again. See lib/assignmentScore.
+      rememberScore(
+        empCode,
+        emoduleId,
+        sectionId,
+        { marks: result.marks, total },
+        examType,
+        attempt
+      );
+
+      // The dialog is awaited, so the learner reads their score before the page
       // moves on; where it moves to depends on whether this was the module's
-      // last assignment.
+      // last assignment. Handing in the pre assignment of a course that also has
+      // a post assignment is never that — it used to be, which sent a learner
+      // straight to the feedback form with half the course still ahead of them.
       if (result.feedbackRequired) {
         await alerts.success(
-          "This was the last assignment. The feedback form is mandatory — until you submit it, this course will not be marked completed.",
-          "Assignment submitted"
+          `${score} That was the last assignment for this course. The feedback form is mandatory — until you submit it, this course will not be marked completed.`,
+          `${paperLabel} submitted`
         );
         grantCourseAccess(emoduleId);
         router.push(`/course/${encodeId(emoduleId)}/feedback`);
       } else {
         await alerts.success(
-          "Your answers have been submitted successfully.",
-          "Assignment submitted"
+          `${score} Your answers have been submitted successfully.`,
+          `${paperLabel} submitted`
         );
         back();
       }
@@ -220,7 +271,9 @@ export default function AssignmentForm({
       {/* Header — no BACK button here: the course layout already provides one
           above, and CANCEL below returns to the course. */}
       <div className="bg-[#3482AE] px-4 py-2">
-        <h2 className="text-white font-bold uppercase tracking-wide">Assignment</h2>
+        <h2 className="text-white font-bold uppercase tracking-wide">
+          {examTypeLabel(examType)}
+        </h2>
       </div>
 
       <div className="m-2 bg-[#cfe4f2] px-3 py-2 font-bold tracking-wide text-[#2f6685] uppercase">
@@ -249,8 +302,8 @@ export default function AssignmentForm({
         </p>
       ) : submitted ? (
         <p className="mx-2 rounded border border-[#20c997] bg-[#20c997]/10 px-3 py-2.5 text-[12px] normal-case text-[#158765]">
-          You have already submitted this assignment. Your answers are shown
-          below for reference — it cannot be answered again.
+          You have already submitted this {examTypeLabel(examType).toLowerCase()} — it cannot be answered
+          again.
         </p>
       ) : readOnly ? (
         <p className="mx-2 rounded border border-[#ffc107] bg-[#ffc107]/10 px-3 py-2.5 text-[12px] normal-case text-[#a17200]">
@@ -276,29 +329,75 @@ export default function AssignmentForm({
             {/* A / B on the first row, C / D on the second — the legacy form
                 lays the four options out row-major across two columns. */}
             <div className="grid grid-cols-1 gap-x-6 gap-y-2.5 md:grid-cols-2">
-              {question.options.map((option) => (
-                <label
-                  key={option.value}
-                  className={`flex items-start gap-2 text-[12px] leading-snug uppercase ${
-                    inert ? "cursor-default" : "cursor-pointer"
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name={`question-${question.id}`}
-                    value={option.value}
-                    checked={answers[question.id] === option.value}
-                    onChange={() => pick(question.id, option.value)}
-                    disabled={inert}
-                    className="mt-0.5 shrink-0 accent-[#3482AE]"
-                  />
-                  <span className="font-bold text-[#1f5f86]">
-                    {OPTION_LETTERS[Number(option.value) - 1]})
-                  </span>
-                  <span className="font-semibold text-[#3086b5]">{option.label}</span>
-                </label>
-              ))}
+              {question.options.map((option) => {
+                const chosen = answers[question.id] === option.value;
+                // On a paper already handed in, the answer given is called out
+                // rather than left to a greyed-out radio. A disabled radio is
+                // the one control a browser draws faintest, which is exactly
+                // backwards here: reading back what was answered is the whole
+                // reason the paper is on screen.
+                const marked = submitted && chosen;
+
+                return (
+                  <label
+                    key={option.value}
+                    className={`flex items-start gap-2 rounded text-[12px] leading-snug uppercase ${
+                      inert ? "cursor-default" : "cursor-pointer"
+                    } ${
+                      // w-fit so the box hugs the answer instead of stretching
+                      // the width of the column, and negative margins that undo
+                      // its own padding — without them the marked option's text
+                      // would sit 8px right of the three beside it, and the
+                      // highlight would knock the row out of line.
+                      marked
+                        ? "w-fit -mx-2 -my-1 border border-[#3482AE] bg-[#eaf3f9] px-2 py-1"
+                        : ""
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name={`question-${question.id}`}
+                      value={option.value}
+                      checked={chosen}
+                      onChange={() => pick(question.id, option.value)}
+                      disabled={inert}
+                      className="mt-0.5 shrink-0 accent-[#3482AE]"
+                    />
+                    <span className="font-bold text-[#1f5f86]">
+                      {OPTION_LETTERS[Number(option.value) - 1]})
+                    </span>
+                    <span
+                      className={
+                        marked
+                          ? "font-bold text-[#2a6a8f]"
+                          : "font-semibold text-[#3086b5]"
+                      }
+                    >
+                      {option.label}
+                    </span>
+                    {/* A dot rather than a worded badge: the row is already
+                        bordered and filled, so this only has to confirm which
+                        one it is. The title carries the words for anyone who
+                        needs them. */}
+                    {marked ? (
+                      <span
+                        title="Your answer"
+                        aria-label="Your answer"
+                        className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[#3482AE]"
+                      />
+                    ) : null}
+                  </label>
+                );
+              })}
             </div>
+            {/* A question left blank on a paper that was handed in. Said
+                plainly — an option row with nothing marked reads as a display
+                fault otherwise. */}
+            {submitted && !answers[question.id] ? (
+              <p className="mt-2 text-[11px] normal-case text-gray-500">
+                No answer was recorded for this question.
+              </p>
+            ) : null}
           </li>
         ))}
       </ol>

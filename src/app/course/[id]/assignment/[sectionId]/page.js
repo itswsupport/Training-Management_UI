@@ -1,20 +1,27 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { use, useEffect, useState } from "react";
+import { use, useEffect, useRef, useState } from "react";
 
 import AssignmentForm from "@/components/course/AssignmentForm";
 import CourseNotice, { CourseLoading } from "@/components/course/CourseNotice";
+import { alerts } from "@/lib/alerts";
 import { apiErrorMessage } from "@/config/api";
+import { readScore, scoreLine } from "@/lib/assignmentScore";
 import { useAuth } from "@/context/AuthContext";
 import { useCourseAccess } from "@/hooks/useCourseAccess";
 import { decodeId, encodeId } from "@/lib/courseId";
 import { grantCourseAccess } from "@/lib/courseGrant";
 import { getEmpCode, isTrainingOfficer } from "@/lib/permissions";
 import {
+  DEFAULT_EXAM_TYPE,
+  EXAM_TYPES,
+  examTypeLabel,
+} from "@/lib/examType";
+import {
   getAssignmentQuestions,
   getSubmittedAnswers,
-  isAssignmentSubmitted,
+  isPaperSubmitted,
 } from "@/services/AssignmentService";
 import { getCourseDetail } from "@/services/ModuleService";
 
@@ -38,6 +45,19 @@ function groupByLecture(lectures, questions) {
   });
 
   return byLecture;
+}
+
+/**
+ * Which paper this page is for, from `?type=`.
+ *
+ * The course content links here once per paper. Anything unrecognised falls
+ * back to the pre assignment — that is what every link written before the post
+ * paper existed meant, and what a hand-typed URL should get.
+ */
+function paperFromUrl() {
+  if (typeof window === "undefined") return DEFAULT_EXAM_TYPE;
+  const asked = new URLSearchParams(window.location.search).get("type");
+  return asked === EXAM_TYPES.POST ? EXAM_TYPES.POST : DEFAULT_EXAM_TYPE;
 }
 
 export default function AssignmentPage({ params }) {
@@ -66,9 +86,8 @@ export default function AssignmentPage({ params }) {
    * back on the course. `replace` rather than `push`, or Back would land them
    * straight back on this redirect.
    *
-   * An assignment already submitted no longer comes here: it used to be sent
-   * back the same way, which left a learner with no way to look at what they
-   * had answered. It now renders read-only with their own answers filled in.
+   * An assignment already submitted takes the same exit, for its own reason —
+   * see `alreadySubmitted` below.
    */
   const nothingToSit = state.status === "empty";
 
@@ -78,6 +97,60 @@ export default function AssignmentPage({ params }) {
     grantCourseAccess(emoduleId);
     router.replace(`/course/${encodeId(emoduleId)}`);
   }, [nothingToSit, emoduleId, router]);
+
+  /**
+   * A paper this learner has already sat.
+   *
+   * The paper IS put back on the screen, with the answers they gave already
+   * marked and nothing clickable. It used to be withheld — the learner was
+   * shown their score in an alert and sent straight back to the course — which
+   * left them no way to see what they had actually answered, and no way to read
+   * the questions again after the fact.
+   *
+   * The score still arrives, in the same alert, once the paper is on screen
+   * behind it. It is the one thing the page cannot show inline: which answers
+   * were right is never sent to the browser, deliberately, so the marks are all
+   * there is to report.
+   *
+   * A training officer is excluded — they open this to check the paper rather
+   * than to sit it, so they get it blank.
+   */
+  const alreadySubmitted = state.status === "ready" && state.submitted && !readOnly;
+
+  // Fired once. React runs effects twice in development under StrictMode, and
+  // an awaited dialog is not idempotent the way the redirect above is.
+  const announced = useRef(false);
+
+  useEffect(() => {
+    if (!alreadySubmitted || announced.current) return;
+    announced.current = true;
+
+    (async () => {
+      const paper = state.examType ?? DEFAULT_EXAM_TYPE;
+      const label = examTypeLabel(paper);
+      const score = readScore(
+        empCode,
+        emoduleId,
+        sectionId,
+        paper,
+        access.retakes
+      );
+      const submittedText = `You have already submitted this ${label.toLowerCase()}, so your answers are shown below and cannot be changed.`;
+      await alerts.success(
+        // The score is missing only when this attempt was handed in from
+        // another browser, so it is left off rather than guessed at.
+        score ? `${scoreLine(score)} ${submittedText}` : submittedText,
+        `${label} submitted`
+      );
+    })();
+  }, [
+    alreadySubmitted,
+    empCode,
+    emoduleId,
+    sectionId,
+    state.examType,
+    access.retakes,
+  ]);
 
   useEffect(() => {
     if (!Number.isFinite(emoduleId) || !Number.isFinite(sectionId)) {
@@ -112,11 +185,20 @@ export default function AssignmentPage({ params }) {
           return;
         }
 
-        const [submitted, questions] = await Promise.all([
-          isAssignmentSubmitted(emoduleId, sectionId, empCode),
-          getAssignmentQuestions(emoduleId, sectionId),
+        // Which paper was asked for. Everything below is scoped to it: the
+        // questions loaded, whether it has been sat, and what each answer is
+        // saved as — without that the post paper opened as the pre one.
+        const examType = paperFromUrl();
+
+        const [answered, questions] = await Promise.all([
+          getSubmittedAnswers(emoduleId, sectionId, empCode),
+          getAssignmentQuestions(emoduleId, sectionId, examType),
         ]);
         if (cancelled) return;
+
+        // Per paper, not per section: `/submit_exam/by_sectionid` cannot tell
+        // the two apart, but a question id belongs to exactly one of them.
+        const submitted = isPaperSubmitted(questions, answered);
 
         if (questions.length === 0) {
           setState({ status: "empty" });
@@ -139,22 +221,21 @@ export default function AssignmentPage({ params }) {
               ? byLecture.get(lectureId)
               : questions;
 
-          // Only worth asking for once the paper is known to be in — an
-          // assignment still being sat has nothing to read back.
-          const answered = submitted
-            ? await getSubmittedAnswers(emoduleId, sectionId, empCode)
-            : null;
-          if (cancelled) return;
-
           setState({
             status: "ready",
             course,
+            examType,
             questions: shown,
             allQuestions: questions,
             lectureNames,
             lectureName: lectureId ? lectureNames[lectureId] : "",
             submitted,
-            answered,
+            // What this learner picked, so a paper already sat comes back with
+            // its own answers marked rather than as a blank form. Only the
+            // answer travels — nothing here says which option was correct.
+            savedAnswers: Object.fromEntries(
+              Object.entries(answered).map(([id, given]) => [id, given.answer])
+            ),
           });
         }
       } catch (err) {
@@ -173,11 +254,27 @@ export default function AssignmentPage({ params }) {
     return () => {
       cancelled = true;
     };
-  }, [emoduleId, sectionId, empCode, access.allowed]);
+  }, [emoduleId, sectionId, empCode, access.allowed, readOnly]);
 
   // The spinner covers the redirect too — a blank frame for the moment the
   // route takes to change reads as a page that failed to load.
-  if (state.status === "loading" || nothingToSit) return <CourseLoading />;
+  if (state.status === "loading" || nothingToSit) {
+    return <CourseLoading />;
+  }
+
+  // The course's quarter has not started, so nothing in it opens yet. Reachable
+  // only through a grant left over from an earlier visit — the course page
+  // itself already refuses — but the paper must refuse on its own terms rather
+  // than rely on that.
+  if (access.locked) {
+    return (
+      <CourseNotice title="Course not open yet">
+        This course is scheduled for a quarter that has not started yet, so its
+        assignment cannot be opened.
+        {access.unlocksOn ? ` It opens on ${access.unlocksOn}.` : ""}
+      </CourseNotice>
+    );
+  }
 
   // A failure is the one case still worth a card: the reason has to be
   // readable, and there is nowhere better to put it.
@@ -195,14 +292,16 @@ export default function AssignmentPage({ params }) {
       sectionId={sectionId}
       empCode={empCode}
       courseName={state.course.name}
+      examType={state.examType}
       questions={state.questions}
       allQuestions={state.allQuestions}
       lectureNames={state.lectureNames}
       lectureName={state.lectureName}
       readOnly={readOnly}
       submitted={state.submitted}
+      savedAnswers={state.savedAnswers}
       overdue={access.overdue}
-      initialAnswers={state.answered}
+      attempt={access.retakes}
     />
   );
 }

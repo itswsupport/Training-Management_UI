@@ -11,7 +11,10 @@ import QuarterFilters from "@/components/dashboards/QuarterFilters";
 import FeedbackFormPanel from "@/components/feedback/FeedbackFormPanel";
 import ModuleFormPanel from "@/components/modules/ModuleFormPanel";
 import { apiErrorMessage } from "@/config/api";
-import { useQuarterFilter } from "@/hooks/useQuarterFilter";
+import {
+  quarterFilterParams,
+  useQuarterFilter,
+} from "@/hooks/useQuarterFilter";
 import { getModules } from "@/services/ModuleService";
 
 const TAB_TITLES = {
@@ -39,7 +42,7 @@ export default function TrainingOfficerDashboard() {
       // The year and quarter go with the request: the officer's list is the
       // whole table, and fetching all of it to show one quarter is what the
       // filter exists to avoid.
-      setData(await getModules({ financialYear: filter.year, quarter: filter.quarter }));
+      setData(await getModules(quarterFilterParams(filter.year, filter.quarter)));
     } catch (err) {
       setData([]);
       setError(apiErrorMessage(err, "Failed to fetch training modules"));

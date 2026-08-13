@@ -160,7 +160,16 @@ function Sidebar({
           data-sidebar="sidebar"
           data-slot="sidebar"
           data-mobile="true"
-          className="bg-sidebar text-sidebar-foreground w-(--sidebar-width) p-0 [&>button]:hidden"
+          // className is merged in, not ignored. Every other branch of this
+          // component honours it, and dropping it here meant the mobile drawer
+          // fell back to the raw tokens: --sidebar is overridden to the brand
+          // blue but --sidebar-foreground is still shadcn's near-black, so the
+          // officer's name and REPL ETMS came out black on blue on a phone and
+          // white on blue everywhere else.
+          className={cn(
+            "bg-sidebar text-sidebar-foreground w-(--sidebar-width) p-0 [&>button]:hidden",
+            className
+          )}
           style={
             {
               "--sidebar-width": SIDEBAR_WIDTH_MOBILE
