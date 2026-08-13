@@ -75,7 +75,7 @@ export const CHAPTERS = [
             items: [
               "Every course assigned to you appears on your USER dashboard, sorted into four states so you can see at a glance what still needs doing.",
               "A course is made of sections. Each section holds lectures, each lecture holds its material — a video, a document, or both — and an assignment.",
-              "You work through the material, sit the assignment, then submit the feedback form. Only then is the course marked completed and the certificate issued.",
+              "You work through the material, complete the assignment, then submit the feedback form. Only then is the course marked completed and the certificate issued.",
               "Courses are assigned to you by the training officer. You do not enrol yourself.",
             ],
           },
@@ -438,7 +438,7 @@ export const CHAPTERS = [
               },
               {
                 title: "Answer and submit",
-                text: "once submitted, the section shows a SUBMITTED badge and you cannot sit that paper again.",
+                text: "once submitted, the section shows a SUBMITTED badge and you cannot take that paper again.",
               },
             ],
           },

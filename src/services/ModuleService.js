@@ -6,6 +6,7 @@
  */
 
 import { api, sendForm, unwrap, getApiUrl } from "@/config/api";
+import { DEFAULT_EXAM_TYPE, EXAM_TYPE_LIST } from "@/lib/examType";
 import { financialYearOf, quarterOf } from "@/services/MasterDataService";
 import {
   clean,
@@ -155,6 +156,26 @@ export async function getDraftModule() {
 }
 
 /**
+ * The two optional links in a module's audience chain, as request params.
+ *
+ * The backend narrows by plant, then department, then grade, then named
+ * employees, and each of the four can only shrink what the one before it
+ * produced. These are the two optional ones: an absent param means "do not
+ * narrow by this", which is how every module raised before these fields existed
+ * was assigned. Both are therefore left off entirely rather than sent empty —
+ * they bind as optional `@RequestParam`s and a blank one would not read the
+ * same way.
+ *
+ * @param {{plantIds?: string[], empCodes?: string[]}} input
+ */
+function optionalAudience({ plantIds, empCodes }) {
+  const params = {};
+  if (plantIds?.length) params["plantIdList[]"] = plantIds;
+  if (empCodes?.length) params["empCodeList[]"] = empCodes;
+  return params;
+}
+
+/**
  * Creates (or updates the single draft) e-module and returns its id.
  *
  * @param {object} input
@@ -165,8 +186,11 @@ export async function getDraftModule() {
  * @param {string} input.kraQuarter
  * @param {string} input.validTill
  * @param {string[]} input.objectives
+ * @param {string[]} [input.plantIds] narrows the departments to these sites
  * @param {string[]} input.deptIds
  * @param {string[]} input.gradeIds
+ * @param {string[]} [input.empCodes] narrows to these employees; empty = all of
+ *   the ones the three filters above already matched
  * @param {string} input.regBy employee code of the training officer
  * @returns {Promise<number>} the saved module id
  */
@@ -189,6 +213,7 @@ export async function saveModule(input) {
     "shortDescList[]": input.objectives?.length ? input.objectives : ["0"],
     "deptIdList[]": input.deptIds,
     "gradeIdList[]": input.gradeIds,
+    ...optionalAudience(input),
   };
   // Reusing the draft slot sends /emodule/save down its UPDATE path, which
   // rebuilds the stored row from these params alone — so the existing course
@@ -257,6 +282,13 @@ export async function updateModuleDetails(input) {
     "shortDescList[]": input.objectives?.length ? input.objectives : ["0"],
     "deptIdList[]": input.deptIds,
     "gradeIdList[]": input.gradeIds,
+    // The same two optional links the create path sends. `/emodule/save`
+    // re-runs its allotment over whoever the four filters resolve to, so these
+    // are what let an edit hand the course to one named employee instead of to
+    // every grade of every department it already went to. Allotment only ever
+    // adds — an employee who already has the course is skipped, and nobody is
+    // ever taken off — so narrowing here cannot withdraw a course in progress.
+    ...optionalAudience(input),
   };
 
   unwrap(await sendForm("/emodule/save", params));
@@ -423,8 +455,12 @@ export async function clearLectureFile(lectureId) {
 }
 
 /**
- * Saves one assignment (pre-test) question. A module needs at least one of
- * these or `/emodule/mail` refuses to submit it.
+ * Saves one assignment question. A module needs at least one of these or
+ * `/emodule/mail` refuses to submit it.
+ *
+ * `examType` picks the paper it belongs to — the pre-test sat before the
+ * lectures, or the post-test after them. It used to be hardcoded to "PRE", so
+ * a post-test could not be written at all.
  */
 export async function saveQuizQuestion({
   emoduleId,
@@ -434,6 +470,7 @@ export async function saveQuizQuestion({
   options,
   answer,
   regBy,
+  examType = DEFAULT_EXAM_TYPE,
 }) {
   const { regDate, regTime } = nowStamp();
   unwrap(
@@ -444,7 +481,7 @@ export async function saveQuizQuestion({
       // section as a whole, which is how every older question is stored.
       lectureId,
       quaName: name,
-      quaType: "PRE",
+      quaType: examType,
       optionsOne: options[0],
       optionsTwo: options[1],
       optionsThree: options[2],
@@ -466,15 +503,23 @@ export async function saveQuizQuestion({
  * strips `quaAnswer` so the correct option never reaches an employee's browser.
  * Here the officer is the one setting that key, so it has to come through.
  *
+ * `/quiz/list` exact-matches `examType` against the stored `quaType`, so one
+ * paper is read at a time — see `getAllSectionQuestions` for both at once.
+ *
  * @param {number|string} emoduleId
  * @param {number|string} sectionId
+ * @param {string} [examType] "PRE" or "POST"
  */
-export async function getSectionQuestions(emoduleId, sectionId) {
+export async function getSectionQuestions(
+  emoduleId,
+  sectionId,
+  examType = DEFAULT_EXAM_TYPE
+) {
   const list =
     unwrap(
       await api.get("/quiz/list", {
         // lowercase "id" — the backend's @RequestParam name.
-        params: { emoduleid: emoduleId, sectionId, examType: "PRE" },
+        params: { emoduleid: emoduleId, sectionId, examType },
       }),
       []
     ) ?? [];
@@ -488,10 +533,34 @@ export async function getSectionQuestions(emoduleId, sectionId) {
       // The stored key is the option's 1-based ordinal; 0 means none marked.
       answer: Number(q.quaAnswer) || 0,
       lectureId: q.lectureId ?? null,
+      // What the row actually says, not what was asked for — a question stored
+      // with some third value would otherwise be relabelled by the request.
+      examType: q.quaType || DEFAULT_EXAM_TYPE,
     }));
 }
 
-/** Rewrites one existing question — text, options, answer key and lecture. */
+/**
+ * Both papers of one section, in one array, each question carrying its own
+ * `examType`. The endpoint filters on one type per call, so this is two calls.
+ */
+export async function getAllSectionQuestions(emoduleId, sectionId) {
+  const papers = await Promise.all(
+    EXAM_TYPE_LIST.map((type) =>
+      getSectionQuestions(emoduleId, sectionId, type.value)
+    )
+  );
+  return papers.flat();
+}
+
+/**
+ * Rewrites one existing question — text, options, answer key, lecture and the
+ * paper it belongs to.
+ *
+ * NOTE: whether `/quiz/update` reads `quaType` is unverified — the parameter is
+ * sent, and Spring ignores one the controller does not declare. So an edit is
+ * safe either way, but moving a SAVED question between the pre and post papers
+ * may not stick until the backend accepts it.
+ */
 export async function updateQuizQuestion({
   id,
   lectureId,
@@ -499,6 +568,7 @@ export async function updateQuizQuestion({
   options,
   answer,
   regBy,
+  examType = DEFAULT_EXAM_TYPE,
 }) {
   unwrap(
     await sendForm(
@@ -507,6 +577,7 @@ export async function updateQuizQuestion({
         id,
         lectureId,
         quaName: name,
+        quaType: examType,
         optionsOne: options[0],
         optionsTwo: options[1],
         optionsThree: options[2],
@@ -534,7 +605,14 @@ const SUBMIT_OK = "Training Module Added Successfully";
  * Success is signalled by `response === "Training Module Added Successfully"`;
  * any other string is the backend's rejection reason.
  */
-export async function submitModule({ emoduleId, regards, deptIds, gradeIds }) {
+export async function submitModule({
+  emoduleId,
+  regards,
+  plantIds,
+  deptIds,
+  gradeIds,
+  empCodes,
+}) {
   const response = unwrap(
     await sendForm("/emodule/mail", {
       emoduleId,
@@ -542,6 +620,9 @@ export async function submitModule({ emoduleId, regards, deptIds, gradeIds }) {
       status: "1",
       "gradeIdList[]": gradeIds,
       "deptIdList[]": deptIds,
+      // The audience was already resolved by /emodule/save; this endpoint walks
+      // it again to decide who to notify, so it has to narrow by the same two.
+      ...optionalAudience({ plantIds, empCodes }),
     })
   );
   if (response !== SUBMIT_OK) {

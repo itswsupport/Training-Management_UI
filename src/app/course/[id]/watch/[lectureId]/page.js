@@ -181,6 +181,19 @@ export default function WatchLecturePage({ params }) {
 
   if (authLoading || state.status === "loading") return <CourseLoading />;
 
+  // The course's quarter has not started, so its lectures are not open yet.
+  // The course page already refuses; this refuses on its own terms so a grant
+  // left over from an earlier visit cannot walk straight into a lecture.
+  if (access.locked) {
+    return (
+      <CourseNotice title="Course not open yet">
+        This course is scheduled for a quarter that has not started yet, so its
+        lectures cannot be watched.
+        {access.unlocksOn ? ` It opens on ${access.unlocksOn}.` : ""}
+      </CourseNotice>
+    );
+  }
+
   if (state.status === "error") {
     return (
       <CourseNotice tone="error" emoduleId={emoduleId}>

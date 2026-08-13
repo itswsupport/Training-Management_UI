@@ -80,11 +80,46 @@ export default function CourseStatusGrid({
       { accessorKey: "empName", header: "EMPLOYEE NAME" },
       { accessorKey: "designation", header: "DESIGNATION" },
       { accessorKey: "course", header: "COURSE" },
-      // KRA QUARTER already spells out the year and quarter with their dates,
-      // so this screen shows that one column rather than the same value three
-      // ways. The filter bar above still works on the year and quarter behind
-      // it — the row carries them whether or not a column shows them.
+      // The year the KRA QUARTER beside it belongs to, ahead of it because it
+      // is the wider of the two — and because it is the pair's own order in the
+      // filter bar above and in ALL MODULES, so the officer reads year then
+      // quarter wherever they are.
+      //
+      // Not redundant with KRA QUARTER, which spells the span out as
+      // "1 [ 2026-04-01 to 2026-06-30 ]": the financial year that span falls in
+      // is 2026-27, and working that out means knowing the year runs April to
+      // March. This column says it. It is also the value the filter above
+      // actually works on, so a filtered report now shows what it is filtered
+      // to instead of leaving it to be inferred from the dates.
+      //
+      // Older courses carry no quarter at all, hence the dash rather than a
+      // guess — the same fallback ALL MODULES uses.
+      {
+        id: "financialYear",
+        header: "FINANCIAL YEAR",
+        accessorFn: (row) => row.financialYear || "",
+        Cell: ({ row }) => row.original.financialYear || "—",
+      },
       { accessorKey: "kraQuarter", header: "KRA QUARTER" },
+      // What each paper was scored, side by side, so an officer can see the two
+      // together — the whole point of a pre and a post assignment is the
+      // difference between them, and a grade alone does not show it. Sorted
+      // numerically off the raw value; a paper not sat reads as a dash rather
+      // than as a zero, which is a real score someone could have got.
+      ...["pre", "post"].map((paper) => ({
+        id: `${paper}Marks`,
+        header: `${paper.toUpperCase()}-ASSIGNMENT MARKS`,
+        accessorFn: (row) => row[`${paper}Marks`] ?? null,
+        sortUndefined: "last",
+        Cell: ({ row }) => {
+          const marks = row.original[`${paper}Marks`];
+          return marks == null ? (
+            <Box sx={{ fontFamily: "Exo", fontSize: "12px", color: "#6b7280" }}>-</Box>
+          ) : (
+            marks
+          );
+        },
+      })),
       { accessorKey: "grade", header: "GRADE" },
       {
         accessorKey: "feedback",
@@ -140,7 +175,10 @@ export default function CourseStatusGrid({
       "EMPLOYEE NAME": item.empName,
       DESIGNATION: item.designation,
       COURSE: item.course,
+      "FINANCIAL YEAR": item.financialYear || "",
       "KRA QUARTER": item.kraQuarter,
+      "PRE-ASSIGNMENT MARKS": item.preMarks ?? "-",
+      "POST-ASSIGNMENT MARKS": item.postMarks ?? "-",
       GRADE: item.grade,
       STATUS: getCourseStatusConfig(item.status).text,
     }));

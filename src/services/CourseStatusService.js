@@ -56,6 +56,15 @@ async function fetchRows(filter = {}) {
     quarter: quarterOf(r.kraQuarter),
     financialYear: financialYearOf(r.kraQuarter),
     grade: clean(r.grade) || "-",
+    // What they scored on each paper, summed over the course's sections. Null
+    // rather than 0 for a paper not sat — a nought is a real score, and the two
+    // must not read the same in a report about who has done the work.
+    preMarks: Number.isFinite(Number(r.preMarks)) && r.preMarks != null
+      ? Number(r.preMarks)
+      : null,
+    postMarks: Number.isFinite(Number(r.postMarks)) && r.postMarks != null
+      ? Number(r.postMarks)
+      : null,
     status: r.status ?? 0,
   }));
 }

@@ -3,15 +3,24 @@
 import React, { useCallback, useImperativeHandle, useRef, useState } from "react";
 import { ChevronDown, Plus, X } from "lucide-react";
 
+import ExamTypeToggle from "@/components/course/ExamTypeToggle";
 import { alerts } from "@/lib/alerts";
 import { apiErrorMessage } from "@/config/api";
 import { useAuth } from "@/context/AuthContext";
+import {
+  DEFAULT_EXAM_TYPE,
+  EXAM_TYPES,
+  EXAM_TYPE_LIST,
+  examTypeLabel,
+  examTypeOf,
+} from "@/lib/examType";
 import { getEmpCode } from "@/lib/permissions";
+import { isSafeFileName, sanitizeUpload } from "@/lib/uploadName";
 import {
   clearLectureFile,
   clearLectureVideo,
   deleteQuizQuestion,
-  getSectionQuestions,
+  getAllSectionQuestions,
   getSections,
   pickedMaterialRun,
   saveQuizQuestion,
@@ -119,7 +128,7 @@ function MaterialField({
         key={nonce}
         type="file"
         accept={accept}
-        onChange={(e) => onPick(e.target.files?.[0] ?? null)}
+        onChange={(e) => onPick(sanitizeUpload(e.target.files?.[0] ?? null))}
         className={fileInputCls}
       />
       <p className="mt-1 flex items-center gap-1.5 text-[11px] normal-case text-gray-500">
@@ -136,13 +145,19 @@ function MaterialField({
           </button>
         ) : null}
       </p>
+      {/* The name shown above is not the one that was picked — say why. */}
+      {picked?.renamedFrom ? (
+        <p className="mt-0.5 text-[11px] normal-case text-[#a17200]">
+          Special characters removed from “{picked.renamedFrom}”.
+        </p>
+      ) : null}
     </div>
   );
 }
 
 const OPTION_LETTERS = ["A", "B", "C", "D"];
 
-const emptyQuestion = (key, lectureIndex) => ({
+const emptyQuestion = (key, lectureIndex, examType = DEFAULT_EXAM_TYPE) => ({
   key,
   id: 0,
   name: "",
@@ -151,6 +166,8 @@ const emptyQuestion = (key, lectureIndex) => ({
   // silently grade everyone against the wrong key.
   answer: 0,
   lectureIndex,
+  // The paper it belongs to — pre-test or post-test; see lib/examType.
+  examType,
   isNew: true,
   dirty: true,
 });
@@ -172,8 +189,12 @@ const toEditableSection = (section) => ({
  * are turned back into ids at the last moment, once the server has assigned
  * them. That is what lets a brand-new lecture carry questions straight away.
  */
-const questionsInSlot = (section, slot) =>
-  section.questions.filter((q) => q.lectureIndex === slot);
+const questionsInSlot = (section, slot, examType = null) =>
+  section.questions.filter(
+    (q) =>
+      q.lectureIndex === slot &&
+      (examType === null || examTypeOf(q) === examType)
+  );
 
 /**
  * Puts each question the server returned under a lecture position.
@@ -197,15 +218,17 @@ function withLectureSlots(questions, lectures) {
 
 /**
  * How a question is named on screen: numbering restarts at 1 under each
- * lecture, so "question 2" means the second question of that lecture rather
- * than the second of the whole section.
+ * lecture AND each paper, so "pre assignment question 2" means the second card
+ * of that lecture's pre tab rather than the second question of the section.
  */
 function questionLabel(section, question) {
   const slot = question.lectureIndex;
-  const position = questionsInSlot(section, slot).indexOf(question) + 1;
+  const paper = examTypeOf(question);
+  const position = questionsInSlot(section, slot, paper).indexOf(question) + 1;
+  const label = `${examTypeLabel(paper).toLowerCase()} question ${position}`;
   return slot >= 0
-    ? `Lecture ${slot + 1}, question ${position}`
-    : `Question ${position}`;
+    ? `Lecture ${slot + 1}, ${label}`
+    : label.charAt(0).toUpperCase() + label.slice(1);
 }
 
 /** Checks one question. Returns the first problem, or null when it is good. */
@@ -259,6 +282,14 @@ function validateSection(section) {
       return `Lecture ${i + 1}: the video must be a video file.`;
     if (l.file && !hasAllowedExtension(l.file, FILE_EXTENSIONS))
       return `Lecture ${i + 1}: the file must be one of ${FILE_LABEL}.`;
+    // Backstop for the cleaning done as the file is picked — the backend
+    // stores and re-finds a material by its name, so a special character in
+    // one is a file that uploads and then cannot be opened again.
+    for (const [kind, upload] of [["video", l.video], ["file", l.file]]) {
+      if (upload && !isSafeFileName(upload.name)) {
+        return `Lecture ${i + 1}: the ${kind} name "${upload.name}" has special characters in it. Re-attach it, or rename the file to letters, digits, dots, dashes and underscores only.`;
+      }
+    }
     const hasMaterial =
       l.video || l.file || l.link.trim() || l.existingVideo || l.existingFile;
     if (!hasMaterial) return `Lecture ${i + 1} needs a video, a file, or a link.`;
@@ -280,8 +311,21 @@ function QuestionCard({ index, question, lectures, onPatch, onRemove }) {
   return (
     <div className="rounded border border-gray-200 bg-[#f8f9fa] p-4">
       <div className="mb-3 flex items-center justify-between">
-        <span className="text-[12px] font-bold tracking-wide text-gray-600 uppercase">
-          Question {index + 1}
+        <span className="flex items-center gap-2">
+          <span className="text-[12px] font-bold tracking-wide text-gray-600 uppercase">
+            Question {index + 1}
+          </span>
+          {/* Which paper. The toggle above already says it, but a card that
+              scrolls away from its own header should still be readable. */}
+          <span
+            className={`rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide uppercase ${
+              examTypeOf(question) === EXAM_TYPES.POST
+                ? "bg-[#ffc107]/20 text-[#8a6100]"
+                : "bg-[#3482AE]/10 text-[#2a6a8f]"
+            }`}
+          >
+            {examTypeLabel(examTypeOf(question))}
+          </span>
         </span>
         <button
           type="button"
@@ -384,6 +428,10 @@ function SectionCard({
   // the lecture's own id so removing a lecture doesn't hand its folded state to
   // the one that takes its place; unsaved lectures fall back to position.
   const [foldedAssignments, setFoldedAssignments] = useState(() => new Set());
+  // Which paper each lecture's block is showing. Display only, for the same
+  // reason as the fold above — switching tabs must never mark the section dirty.
+  const [openPaper, setOpenPaper] = useState({});
+  const paperFor = (key) => openPaper[key] ?? DEFAULT_EXAM_TYPE;
   const assignmentKey = (lecture, i) => (lecture.id ? `l${lecture.id}` : `i${i}`);
   const toggleAssignment = (key) =>
     setFoldedAssignments((prev) => {
@@ -398,8 +446,15 @@ function SectionCard({
       lectures: section.lectures.map((l, j) => (j === i ? { ...l, ...changes } : l)),
     });
 
-  /** The questions shown under the lecture at position `i`. */
-  const questionsFor = (i) => questionsInSlot(section, i);
+  /** The questions under the lecture at position `i`, optionally one paper. */
+  const questionsFor = (i, examType = null) =>
+    questionsInSlot(section, i, examType);
+
+  /** How many questions each paper of one lecture holds, for the toggle. */
+  const paperCounts = (i) =>
+    Object.fromEntries(
+      EXAM_TYPE_LIST.map((t) => [t.value, questionsFor(i, t.value).length])
+    );
 
   /**
    * Takes one material off a lecture — the freshly picked file if there is one,
@@ -623,6 +678,8 @@ function SectionCard({
                     // a lecture typed in a moment ago can carry them too — the
                     // ids are resolved when the section is saved.
                     const canAddQuestion = !section.questionsLoading;
+                    const paper = paperFor(key);
+                    const shown = questionsFor(i, paper);
 
                     return (
                       <div className="mt-4 overflow-hidden rounded border border-gray-200 bg-white">
@@ -643,10 +700,17 @@ function SectionCard({
                             <span className="truncate">
                               Assignment — Lecture {i + 1}
                             </span>
-                            <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-gray-600 normal-case">
-                              {questionsFor(i).length} question(s)
-                            </span>
                           </button>
+                          {/* Pre / post. Switching only changes which paper is
+                              on screen; a question is never moved between them
+                              by the toggle. */}
+                          <ExamTypeToggle
+                            value={paper}
+                            counts={paperCounts(i)}
+                            onChange={(type) =>
+                              setOpenPaper((prev) => ({ ...prev, [key]: type }))
+                            }
+                          />
                           {canAddQuestion ? (
                             <button
                               type="button"
@@ -659,11 +723,14 @@ function SectionCard({
                                   next.delete(key);
                                   return next;
                                 });
-                                onAddQuestion(i);
+                                // Onto whichever paper is open, so the button
+                                // always adds to what is being looked at.
+                                onAddQuestion(i, paper);
                               }}
                               className={`ml-auto ${addMoreOnTintCls}`}
                             >
-                              <Plus className="w-3.5 h-3.5" /> Add Question
+                              <Plus className="w-3.5 h-3.5" /> Add{" "}
+                              {examTypeLabel(paper)} Question
                             </button>
                           ) : null}
                         </div>
@@ -674,15 +741,16 @@ function SectionCard({
                               <p className="text-[12px] normal-case text-gray-500">
                                 Loading questions…
                               </p>
-                            ) : questionsFor(i).length === 0 ? (
+                            ) : shown.length === 0 ? (
                               <p className="text-[12px] normal-case text-gray-500">
-                                No questions yet for this lecture.
+                                No {examTypeLabel(paper).toLowerCase()} questions
+                                yet for this lecture.
                               </p>
                             ) : (
                               <div className="space-y-3">
-                                {/* `qi` is the position within THIS lecture, so
-                                    every lecture's questions number from 1. */}
-                                {questionsFor(i).map((question, qi) => (
+                                {/* `qi` is the position within THIS lecture's
+                                    open paper, so each one numbers from 1. */}
+                                {shown.map((question, qi) => (
                                   <QuestionCard
                                     key={question.key}
                                     index={qi}
@@ -766,7 +834,9 @@ export default function CourseContentEditor({ course, ref }) {
       }
       patchOne(key, { questionsLoading: true });
       try {
-        const list = await getSectionQuestions(course.id, target.id);
+        // Both papers, so a post-test written at creation is editable here
+        // rather than invisible — and so a save cannot quietly drop it.
+        const list = await getAllSectionQuestions(course.id, target.id);
         setSections((prev) =>
           prev.map((s) =>
             s.key === key
@@ -813,13 +883,19 @@ export default function CourseContentEditor({ course, ref }) {
       )
     );
 
-  const addQuestion = (sectionKey, lectureIndex) => {
+  const addQuestion = (sectionKey, lectureIndex, examType) => {
     questionSeq.current += 1;
     const key = `q-new-${questionSeq.current}`;
     setSections((prev) =>
       prev.map((s) =>
         s.key === sectionKey
-          ? { ...s, questions: [...s.questions, emptyQuestion(key, lectureIndex)] }
+          ? {
+              ...s,
+              questions: [
+                ...s.questions,
+                emptyQuestion(key, lectureIndex, examType),
+              ],
+            }
           : s
       )
     );
@@ -1052,6 +1128,7 @@ export default function CourseContentEditor({ course, ref }) {
             options: question.options.map((o) => o.trim()),
             answer: question.answer,
             regBy: actionBy,
+            examType: examTypeOf(question),
           };
           if (question.isNew) {
             // Nothing to hang it on — the section save must have failed to
@@ -1118,8 +1195,8 @@ export default function CourseContentEditor({ course, ref }) {
               onPatchQuestion={(questionKey, changes) =>
                 patchQuestion(section.key, questionKey, changes)
               }
-              onAddQuestion={(lectureIndex) =>
-                addQuestion(section.key, lectureIndex)
+              onAddQuestion={(lectureIndex, examType) =>
+                addQuestion(section.key, lectureIndex, examType)
               }
               onRemoveQuestion={(questionKey) =>
                 removeQuestion(section.key, questionKey)

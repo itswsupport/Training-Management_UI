@@ -167,9 +167,20 @@
 
 /* The defining part of the payroll-ui look: uppercase everything. Screens that
    need mixed-case prose (course descriptions, feedback questions) opt out with
-   Tailwind's `normal-case`. */
-* {
-  text-transform: uppercase;
+   Tailwind's `normal-case`.
+
+   It has to sit INSIDE a layer for that opt-out to work. Unlayered rules beat
+   layered ones outright — specificity is never consulted across that line — and
+   `.normal-case` is emitted by Tailwind into `@layer utilities`. Written bare,
+   this rule silently overrode all ~117 opt-outs in the app, so course
+   descriptions, filenames, learner-facing sentences and error messages were all
+   being shouted in capitals however carefully they had been opted out. In
+   `base` it is a default instead: still uppercase by nature, still beaten by an
+   explicit `.uppercase`, and now properly beaten by `.normal-case`. */
+@layer base {
+  * {
+    text-transform: uppercase;
+  }
 }
 
 html {

@@ -8,6 +8,11 @@ import { apiErrorMessage } from "@/config/api";
 import { encodeId } from "@/lib/courseId";
 import { grantCourseAccess } from "@/lib/courseGrant";
 import { isOpenEnded, submitFeedback } from "@/services/FeedbackService";
+import {
+  COURSE_STATUS,
+  MAX_RETAKES,
+  getAssignedCourse,
+} from "@/services/UserCourseService";
 
 const OPTION_LETTERS = ["A", "B", "C", "D", "E"];
 
@@ -52,14 +57,57 @@ export default function CourseFeedbackForm({
     setSubmitting(true);
     try {
       await submitFeedback(empCode, emoduleId, answers);
+
+      // This submit is what grades the course, and a grade C hands it straight
+      // back to the learner's Pending list — so the row is read back to see
+      // which of the two actually happened. Without it the learner was told the
+      // course was complete and then found it sitting in Pending again with no
+      // explanation of why.
+      //
+      // The status is what decides the wording, not the grade letter: the
+      // hand-back is the backend's own call (it has a ceiling on how many times
+      // it will do it), and the row's status is the one thing that reports it
+      // without this side having to re-derive the rule.
+      const outcome = await getAssignedCourse(empCode, emoduleId).catch(
+        () => null
+      );
+      const grade = outcome?.course?.grade;
+      const handedBack = outcome?.status === COURSE_STATUS.PENDING;
+      const attemptsLeft = outcome?.course?.attemptsLeft ?? 0;
+      const lastAttempt = (outcome?.course?.retakes ?? 0) >= MAX_RETAKES;
+
       // The dialog is awaited, so the learner reads it before the page moves —
       // and it says the one thing this submit was for. It used to hand over to
       // a card that said the same and held a single link to the dashboard, so
       // finishing a course took one more click than it had any reason to.
-      await alerts.success(
-        "Your feedback has been submitted and this course is now complete. Your grade has been recorded.",
-        "Course completed"
-      );
+      if (handedBack) {
+        await alerts.warning(
+          `Your feedback has been submitted. You have been graded C for this course, so it has come back to your PENDING list and you can take it again.${
+            attemptsLeft > 0
+              ? ` You have ${attemptsLeft} attempt${
+                  attemptsLeft === 1 ? "" : "s"
+                } left.`
+              : ""
+          } Your lecture progress has been kept — reopen the course to take the assignment again.`,
+          "Grade C — course back in pending"
+        );
+      } else if (grade === "C") {
+        // Completed at C: the hand-backs are used up, so this grade stands.
+        // Said plainly rather than left to be discovered from the dashboard.
+        await alerts.info(
+          `Your feedback has been submitted and this course is now complete. Your grade is C${
+            lastAttempt ? ", and this was your last attempt, so it stands" : ""
+          }.`,
+          "Course completed — grade C"
+        );
+      } else {
+        await alerts.success(
+          `Your feedback has been submitted and this course is now complete. Your grade${
+            grade && grade !== "-" ? ` (${grade})` : ""
+          } has been recorded.`,
+          "Course completed"
+        );
+      }
       router.push("/UserDashboard");
     } catch (err) {
       const message = apiErrorMessage(err, "Could not submit the feedback form.");
@@ -106,7 +154,7 @@ export default function CourseFeedbackForm({
                 rows={3}
                 value={answers[question.id] ?? ""}
                 onChange={(e) => set(question.id, e.target.value)}
-                className="w-full rounded border border-gray-300 px-3 py-2 text-xs normal-case text-gray-800 outline-none focus:border-[#3482AE]"
+                className="w-full rounded border border-gray-300 px-3 py-2 text-[14px] leading-snug normal-case text-gray-800 outline-none focus:border-[#3482AE]"
               />
             ) : (
               // A/B then C/D then E — options run row-major down two columns,

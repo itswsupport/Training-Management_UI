@@ -21,6 +21,43 @@ export const COURSE_STATUS = {
 };
 
 /**
+ * How many times a course is handed back after a grade C, and so how many
+ * sittings a learner gets in all: the first one plus these.
+ *
+ * Mirrors MAX_RETAKES in the backend's EmoduleServiceImpl, which is what
+ * actually enforces it — this side only says what the number means. The count
+ * of hand-backs already used arrives on the row as `retakeCount`.
+ */
+export const MAX_RETAKES = 2;
+
+/**
+ * Sittings this learner still has at a course.
+ *
+ * Sittings, not retakes: a course handed back once has been sat once and may be
+ * sat twice more, and "2 attempts left" is what a learner looking at it means by
+ * the words. The sitting in front of them counts as one of them, so the number
+ * only falls as each is finished.
+ *
+ * A completed course has none left whatever the counter says. The count is
+ * derived from hand-backs, and the last sitting is the one that is never handed
+ * back — so a course finished at C on the third attempt still holds
+ * retakeCount 2 and worked out to "1 attempt left" for a course that was over.
+ *
+ * 0 therefore means one of two things, and the caller tells them apart by
+ * `retakes`: a course that never came back has nothing to say about attempts at
+ * all, while one that came back and is now finished has none left.
+ *
+ * @param {number|string} retakeCount hand-backs used, off the learner's row
+ * @param {number} [status] one of COURSE_STATUS
+ */
+export const attemptsLeftOf = (retakeCount, status) => {
+  const used = Number(retakeCount) || 0;
+  if (used === 0) return 0;
+  if (Number(status) === COURSE_STATUS.COMPLETED) return 0;
+  return Math.max(0, MAX_RETAKES + 1 - used);
+};
+
+/**
  * Local testing only: courses to treat as OVERDUE whatever the backend says.
  *
  * Nothing in this app can put a course into the overdue list — status 3 is set
@@ -90,6 +127,8 @@ async function forcedRow(spec, index) {
     kraQuarter,
     quarter: quarterOf(kraQuarter),
     financialYear: financialYearOf(kraQuarter),
+    retakes: 0,
+    attemptsLeft: 0,
     empName: "",
   };
 }
@@ -161,6 +200,11 @@ export async function getUserCourses(empCode, status, filter = {}) {
       kraQuarter: clean(e.kraQuarter),
       quarter: quarterOf(e.kraQuarter),
       financialYear: financialYearOf(e.kraQuarter),
+      // Hand-backs after a grade C, and the sittings they leave. Both live on
+      // the learner's own row, not on the course: two people can be on quite
+      // different attempts at the same module.
+      retakes: Number(row.retakeCount) || 0,
+      attemptsLeft: attemptsLeftOf(row.retakeCount, row.status ?? status),
       empName: fullName(u.employeeFname, u.employeeLname),
     };
   });
@@ -236,7 +280,8 @@ export async function getUserCoursesWithStamps(empCode, status, filter = {}) {
 }
 
 /**
- * Which of the learner's own lists this course sits in, or null if none.
+ * This course as it sits in one of the learner's own lists, with which list —
+ * or null when it is not theirs at all.
  *
  * The course routes take the module id from the URL, and nothing about
  * `/emodule` binds a module to an employee — it will happily return any course
@@ -248,14 +293,18 @@ export async function getUserCoursesWithStamps(empCode, status, filter = {}) {
  * The status matters beyond yes/no: an overdue course is still the learner's to
  * read, but its quarter has lapsed, so nothing may be submitted against it.
  *
+ * The row itself is returned, not just the status, because the course page has
+ * to know the quarter it covers: one raised for a quarter still ahead is locked
+ * until that quarter starts, and `kraQuarter` lives on the row.
+ *
  * A learner's course sits in exactly one status, so all four are asked at once
  * and the first hit wins.
  *
  * @param {string} empCode
  * @param {number|string} moduleId
- * @returns {Promise<number|null>} one of COURSE_STATUS, or null if not theirs
+ * @returns {Promise<{status: number, course: object}|null>}
  */
-export async function getAssignedStatus(empCode, moduleId) {
+export async function getAssignedCourse(empCode, moduleId) {
   if (!empCode || !Number.isFinite(Number(moduleId))) return null;
 
   const statuses = Object.values(COURSE_STATUS);
@@ -266,10 +315,22 @@ export async function getAssignedStatus(empCode, moduleId) {
     )
   );
 
-  const hit = lists.findIndex((list) =>
-    list.some((c) => String(c.id) === String(moduleId))
-  );
-  return hit === -1 ? null : statuses[hit];
+  for (let i = 0; i < lists.length; i += 1) {
+    const course = lists[i].find((c) => String(c.id) === String(moduleId));
+    if (course) return { status: statuses[i], course };
+  }
+  return null;
+}
+
+/**
+ * As above, but only which list it is in.
+ *
+ * @param {string} empCode
+ * @param {number|string} moduleId
+ * @returns {Promise<number|null>} one of COURSE_STATUS, or null if not theirs
+ */
+export async function getAssignedStatus(empCode, moduleId) {
+  return (await getAssignedCourse(empCode, moduleId))?.status ?? null;
 }
 
 /**

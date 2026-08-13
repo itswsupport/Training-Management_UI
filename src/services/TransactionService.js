@@ -7,6 +7,12 @@
  */
 
 import { api, unwrap } from "@/config/api";
+import {
+  financialYearLabel,
+  financialYearOf,
+  quarterLabel,
+  quarterOf,
+} from "@/services/MasterDataService";
 import { clean } from "@/utils/etmsFormat";
 
 /** The actions the backend writes, with the label the grid shows. */
@@ -43,6 +49,73 @@ const FIELD_LABELS = {
   status: "Status",
 };
 
+/** What a module's `status` column means. Only these two are ever written. */
+const STATUS_LABELS = { 0: "Draft", 1: "Published" };
+
+/** "2026-03-31" → "31-03-2026", the form dates are shown in everywhere else. */
+const dateText = (value) => {
+  const [y, m, d] = clean(value).split("-");
+  return d ? `${d}-${m}-${y}` : clean(value);
+};
+
+/**
+ * The names behind one id, or the ids themselves when the master has no row
+ * for them — a department since closed still has to read as something.
+ */
+const namesOf = (value, labels) =>
+  clean(value)
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean)
+    .map((id) => labels?.get(id) ?? id)
+    .join(", ");
+
+/**
+ * One snapshot value as the officer's own form words it.
+ *
+ * The backend stores this history the way it stores the module — category,
+ * departments and grades as ids, status as a number, the quarter as its raw
+ * `1 [ 2026-04-01 to 2026-06-30 ]` span — so a change read straight out of the
+ * snapshot says `Category: 3 → 7` and names nothing. Everything here is the
+ * translation back into what was actually picked on screen.
+ *
+ * `labels` is what `getSnapshotLabels()` returns, and is optional: with none
+ * (or with a master that failed to load) the id is shown as it was stored,
+ * which is worse to read but never wrong.
+ *
+ * @param {string} field the snapshot key
+ * @param {string} value the stored value
+ * @param {{categories?: Map, departments?: Map, grades?: Map}} [labels]
+ */
+export function snapshotText(field, value, labels) {
+  const text = clean(value);
+  if (!text) return "";
+
+  switch (field) {
+    case "category":
+      return labels?.categories?.get(text) ?? text;
+    case "dept":
+      return namesOf(text, labels?.departments);
+    case "grade":
+      return namesOf(text, labels?.grades);
+    case "status":
+      return STATUS_LABELS[text] ?? text;
+    case "validTill":
+      return dateText(text);
+    case "quarter": {
+      // "1 [ 2026-04-01 to 2026-06-30 ]" → "1 (Apr - Jun) 2026-27". The span is
+      // dropped rather than shown: the quarter and the year it belongs to are
+      // what an officer chose, and the dates only restate them.
+      const label = quarterLabel(quarterOf(text));
+      const year = financialYearOf(text);
+      if (!label) return text;
+      return year ? `${label} ${financialYearLabel(year)}` : label;
+    }
+    default:
+      return text;
+  }
+}
+
 /** A snapshot that cannot be read is treated as absent, never as an error. */
 const parseSnapshot = (value) => {
   const text = clean(value);
@@ -61,6 +134,10 @@ const parseSnapshot = (value) => {
  * `changed_fields` already names what differs, so this only has to read those
  * keys out of the two snapshots. A create has no "before", so every field of
  * the new snapshot is reported as a starting value.
+ *
+ * `from` and `to` come out exactly as the snapshot stored them — ids and codes
+ * included. Put them through `snapshotText` before showing them; that is where
+ * a category id becomes a category name.
  */
 export function fieldChanges(changedFields, oldValue, newValue) {
   const before = parseSnapshot(oldValue);
@@ -76,6 +153,17 @@ export function fieldChanges(changedFields, oldValue, newValue) {
     to: String(after[field] ?? ""),
   }));
 }
+
+/** The snapshot fields whose stored value is an id rather than a word. */
+const ID_FIELDS = new Set(["category", "dept", "grade"]);
+
+/**
+ * Whether any of these rows changed a field held as ids — which is to say,
+ * whether the master lists are worth a request. A history of renames and
+ * description edits needs none of them.
+ */
+export const usesSnapshotLabels = (rows) =>
+  rows.some((row) => row.changes?.some((change) => ID_FIELDS.has(change.field)));
 
 /** Where the officers, the backend and every other ETMS stamp keep time. */
 const DISPLAY_TIME_ZONE = "Asia/Kolkata";

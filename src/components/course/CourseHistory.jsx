@@ -4,9 +4,11 @@ import { useCallback, useEffect, useState } from "react";
 import { ArrowRight } from "lucide-react";
 
 import { apiErrorMessage } from "@/config/api";
-import { getEmployeeNames } from "@/services/MasterDataService";
+import { getEmployeeNames, getSnapshotLabels } from "@/services/MasterDataService";
 import {
   getTransactions,
+  snapshotText,
+  usesSnapshotLabels,
   withoutCreationRun,
 } from "@/services/TransactionService";
 
@@ -28,17 +30,26 @@ const td = "px-3 py-2 align-top text-[12px] text-gray-700";
 /** An empty before-value on a create reads better than an empty cell. */
 const shown = (value) => (value === "" ? "—" : value);
 
-/** One `Instructor: AREF SHAIKH → AARTI ATKARE` line. */
-function FieldChange({ change }) {
+/**
+ * One `Instructor: AREF SHAIKH → AARTI ATKARE` line.
+ *
+ * The snapshot behind it holds ids, so both sides go through `snapshotText`
+ * with the master lists — that is what turns `Category: 3 → 7` into
+ * `Category: Safety → Technical`.
+ */
+function FieldChange({ change, labels }) {
+  const from = snapshotText(change.field, change.from, labels);
+  const to = snapshotText(change.field, change.to, labels);
+
   return (
     <div className="flex flex-wrap items-baseline gap-1.5 normal-case">
       <span className="font-semibold text-gray-800">{change.label}:</span>
       <span className="rounded bg-[#dc3545]/8 px-1.5 py-0.5 text-[#c2384a]">
-        {shown(change.from)}
+        {shown(from)}
       </span>
       <ArrowRight className="h-3 w-3 shrink-0 text-gray-400" />
       <span className="rounded bg-[#20c997]/12 px-1.5 py-0.5 font-semibold text-[#158765]">
-        {shown(change.to)}
+        {shown(to)}
       </span>
     </div>
   );
@@ -57,6 +68,7 @@ function FieldChange({ change }) {
 export default function CourseHistory({ emoduleId }) {
   const [rows, setRows] = useState([]);
   const [names, setNames] = useState(null);
+  const [labels, setLabels] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showAll, setShowAll] = useState(false);
@@ -85,6 +97,16 @@ export default function CourseHistory({ emoduleId }) {
           .then(setNames)
           // The roster is a courtesy, not the record. Failing to reach it
           // leaves the codes showing rather than taking the history down.
+          .catch(() => {});
+      }
+
+      // Same bargain for the category, department and grade names: only worth
+      // fetching when an edit here actually touched one of those fields, and
+      // not worth holding the table behind. Until they land — or if they never
+      // do — those changes read as the ids the snapshot stored.
+      if (usesSnapshotLabels(history)) {
+        getSnapshotLabels()
+          .then(setLabels)
           .catch(() => {});
       }
     } catch (err) {
@@ -178,7 +200,11 @@ export default function CourseHistory({ emoduleId }) {
                         {row.action === "MODULE_UPDATED" && row.changes.length ? (
                           <div className="space-y-1">
                             {row.changes.map((change) => (
-                              <FieldChange key={change.field} change={change} />
+                              <FieldChange
+                                key={change.field}
+                                change={change}
+                                labels={labels}
+                              />
                             ))}
                           </div>
                         ) : (

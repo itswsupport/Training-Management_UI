@@ -112,6 +112,16 @@ export default function CourseFeedbackPage({ params }) {
   // Submitting feedback is what completes a course and records the grade, so an
   // overdue course cannot be given any. There is no read-only version worth
   // showing — the form exists only to be submitted.
+  // Nothing to give feedback on yet — the course has not opened.
+  if (access.locked) {
+    return (
+      <CourseNotice title="Course not open yet">
+        This course is scheduled for a quarter that has not started yet.
+        {access.unlocksOn ? ` It opens on ${access.unlocksOn}.` : ""}
+      </CourseNotice>
+    );
+  }
+
   if (access.overdue) {
     return (
       <CourseNotice tone="error" emoduleId={emoduleId} title="Course overdue">

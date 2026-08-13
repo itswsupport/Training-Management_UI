@@ -9,6 +9,7 @@ import {
   Layers,
   Lock,
   Pencil,
+  RotateCcw,
   Sparkles,
   User,
 } from "lucide-react";
@@ -18,6 +19,7 @@ import CourseContent from "@/components/course/CourseContent";
 import CourseContentEditor from "@/components/course/CourseContentEditor";
 import CourseDetailsEditor from "@/components/course/CourseDetailsEditor";
 import CourseHistory from "@/components/course/CourseHistory";
+import CourseNotice from "@/components/course/CourseNotice";
 import CoursePreviewCard from "@/components/course/CoursePreviewCard";
 import RichText from "@/components/course/RichText";
 import TopicsCovered from "@/components/course/TopicsCovered";
@@ -228,6 +230,24 @@ export default function CourseViewPage({ params }) {
     );
   }
 
+  // Raised for a quarter still ahead. The course is theirs and shows in their
+  // PENDING list from the day it is assigned, but none of it opens until the
+  // quarter it covers starts — so this stands in place of the whole page rather
+  // than disabling the lectures one by one. No emoduleId is passed: the notice's
+  // own BACK button would otherwise point back at this very page.
+  if (access.locked) {
+    return (
+      <CourseNotice title="Course not open yet">
+        <strong>{course.name}</strong> is scheduled for a quarter that has not
+        started yet.
+        {access.unlocksOn
+          ? ` You can begin it from ${access.unlocksOn}.`
+          : " You can begin it once its quarter starts."}{" "}
+        It stays in your pending list until then.
+      </CourseNotice>
+    );
+  }
+
   // Officer edit mode replaces the course header with the details form; the
   // sections and lectures below stay as they are, read-only.
   if (editing && options && canEdit) {
@@ -318,6 +338,36 @@ export default function CourseViewPage({ params }) {
             {/* The officer's way in, and the learner's way out: editing sits
                 with the course it edits, not adrift at the foot of the page. */}
             <div className="flex shrink-0 flex-wrap items-center gap-2">
+              {/* This course came back to be sat again after a grade C.
+                  Amber, and on the right with the actions rather than among
+                  the identifying badges on the left: it is a thing about this
+                  attempt that the learner has to act on, not another label for
+                  the course. It reads as a warning without being an error —
+                  the course is not in trouble, it simply has to be taken
+                  again. Shown on the course rather than in the dashboard list,
+                  which has room for a number and no room for the reason.
+
+                  Shown on `retakes`, not on the count itself: once the last
+                  sitting is finished there are none left, and a badge that
+                  disappeared at exactly that point left the learner with no
+                  answer to the one question they have — whether they can take
+                  it again. It says "0 attempts left" instead, in the same
+                  amber: it is the same fact about the same course, and a
+                  second colour for the end of it would read as a new state. */}
+              {access.retakes > 0 ? (
+                <span
+                  title={
+                    access.attemptsLeft > 0
+                      ? "Completed with grade C, so the course was returned to be taken again."
+                      : "All attempts for this course have been used, so the grade recorded stands."
+                  }
+                  className="flex items-center gap-2 rounded bg-[#ffc107] px-4 py-2 text-[12px] font-bold tracking-wide text-[#5a4300] uppercase shadow"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  {access.attemptsLeft} attempt
+                  {access.attemptsLeft === 1 ? "" : "s"} left
+                </span>
+              ) : null}
               {feedbackDue ? (
                 <Link
                   href={`/course/${encodeId(course.id)}/feedback`}
@@ -425,6 +475,7 @@ export default function CourseViewPage({ params }) {
           <CourseContent
             emoduleId={course.id}
             sections={course.sections}
+            attempt={access.retakes}
             preview={isTrainingOfficer(user)}
             onPlay={setActiveVideo}
           />

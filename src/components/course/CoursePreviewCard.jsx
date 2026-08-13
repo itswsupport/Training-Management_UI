@@ -31,6 +31,19 @@ export const WATCHED_TARGET = 0.9;
 const MAX_SPEED = 1.25;
 
 /**
+ * How far ahead of the furthest second actually watched a seek may land before
+ * it counts as skipping.
+ *
+ * Not zero, for two different reasons. The uploaded-video player learns its
+ * position from `timeupdate`, which fires a few times a second rather than
+ * continuously, and the YouTube player is polled once a second — so under plain
+ * playback the furthest second known is always a little behind the head. A
+ * couple of seconds of slack keeps normal watching from tripping the lock while
+ * still being far too small to skip anything with.
+ */
+const SEEK_LEEWAY = 2;
+
+/**
  * Reports what a lecture video is worth and how much of it has gone by.
  *
  * Time is only counted while something is actually playing. This card sits on
@@ -66,6 +79,40 @@ function useVideoProgress(material) {
   });
 
   return { report, setPlaying };
+}
+
+/**
+ * Shown for a moment when a seek is pushed back, because a scrubber that
+ * silently refuses to move reads as a broken player rather than a rule.
+ */
+function SkipNotice() {
+  return (
+    <span className="absolute bottom-14 left-1/2 z-10 -translate-x-1/2 rounded bg-black/75 px-3 py-1.5 text-[11px] font-semibold text-white normal-case">
+      You cannot skip ahead — the video opens up as you watch it.
+    </span>
+  );
+}
+
+/**
+ * Holds the "no skipping" notice up for a beat, and takes it down again.
+ *
+ * The timer is cleared on unmount as well as on the next refusal: a learner who
+ * navigates away mid-notice would otherwise leave a setState pointing at a
+ * component that is gone.
+ */
+function useSkipNotice() {
+  const [shown, setShown] = useState(false);
+  const timer = useRef(null);
+
+  const refuse = useCallback(() => {
+    setShown(true);
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setShown(false), 2500);
+  }, []);
+
+  useEffect(() => () => clearTimeout(timer.current), []);
+
+  return { shown, refuse };
 }
 
 /** The watched pill, in the same place whichever player is behind it. */
@@ -134,6 +181,7 @@ export function TrackedYouTube({ videoId, title, onWatched, material }) {
   const reported = useRef(false);
   const [coverage, setCoverage] = useState(0);
   const [blocked, setBlocked] = useState(false);
+  const { shown: refused, refuse } = useSkipNotice();
   const { report, setPlaying } = useVideoProgress(material);
 
   useEffect(() => {
@@ -161,6 +209,17 @@ export function TrackedYouTube({ videoId, title, onWatched, material }) {
       if (!total) return;
 
       const at = Math.floor(player.getCurrentTime());
+
+      // Skipped ahead. There is no seek event to intercept on an embed, so the
+      // poll is what notices — the head is put back and the second it landed on
+      // is not credited. Only for coursework: a trailer has no `onWatched` and
+      // stays free to scrub.
+      if (onWatched && at > furthest.current + SEEK_LEEWAY) {
+        player.seekTo?.(furthest.current, true);
+        refuse();
+        return;
+      }
+
       seen.current.add(at);
       furthest.current = Math.max(furthest.current, at);
 
@@ -207,10 +266,10 @@ export function TrackedYouTube({ videoId, title, onWatched, material }) {
       if (poll) clearInterval(poll);
       player?.destroy?.();
     };
-    // `report` and `setPlaying` are stable for the life of the component, so
-    // naming them here cannot rebuild the player — which must not happen, as it
-    // would drop the seconds already watched.
-  }, [videoId, onWatched, report, setPlaying]);
+    // `report`, `setPlaying` and `refuse` are stable for the life of the
+    // component, so naming them here cannot rebuild the player — which must not
+    // happen, as it would drop the seconds already watched.
+  }, [videoId, onWatched, report, setPlaying, refuse]);
 
   // With the API out of reach there is nothing to report on, so the plain embed
   // goes back in and the badge stays off rather than showing a figure that
@@ -234,6 +293,7 @@ export function TrackedYouTube({ videoId, title, onWatched, material }) {
         <div ref={holder} className="h-full w-full" />
       </div>
       {onWatched ? <WatchedBadge coverage={coverage} /> : null}
+      {refused ? <SkipNotice /> : null}
     </>
   );
 }
@@ -255,7 +315,26 @@ export function TrackedVideo({ src, onWatched, material }) {
   const furthest = useRef(0);
   const reported = useRef(false);
   const [coverage, setCoverage] = useState(0);
+  const { shown: refused, refuse } = useSkipNotice();
   const { report, setPlaying } = useVideoProgress(material);
+
+  /**
+   * Puts back any seek that lands past the furthest second already watched.
+   *
+   * `seeking` fires for the scrubber, the keyboard arrows and any script that
+   * moves the head, so all three are covered by the one handler; plain playback
+   * never fires it. Seeking *backwards* is left alone — rewatching is not
+   * skipping, and the unique-seconds count already makes it earn nothing twice.
+   *
+   * Snapping back re-fires `seeking`, but at a time that is by definition within
+   * the limit, so it settles rather than looping.
+   */
+  const handleSeeking = (event) => {
+    const video = event.currentTarget;
+    if (video.currentTime <= furthest.current + SEEK_LEEWAY) return;
+    video.currentTime = furthest.current;
+    refuse();
+  };
 
   const handleTimeUpdate = (event) => {
     const video = event.currentTarget;
@@ -293,6 +372,10 @@ export function TrackedVideo({ src, onWatched, material }) {
         playsInline
         preload="metadata"
         onTimeUpdate={onWatched ? handleTimeUpdate : undefined}
+        // Locked only for coursework. Without `onWatched` this is the card's
+        // own trailer or an officer looking around, and neither is being
+        // marked on what they watched.
+        onSeeking={onWatched ? handleSeeking : undefined}
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
         onEnded={() => setPlaying(false)}
@@ -301,6 +384,7 @@ export function TrackedVideo({ src, onWatched, material }) {
       {/* Said out loud, so the requirement is not a trap the learner only
           discovers by finding the assignment still locked. */}
       {onWatched ? <WatchedBadge coverage={coverage} /> : null}
+      {refused ? <SkipNotice /> : null}
     </>
   );
 }
