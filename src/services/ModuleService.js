@@ -36,6 +36,12 @@ const toModuleRow = (m) => ({
   instructor: clean(m.emoduleAuthor),
   description: clean(m.emoduleLongDesc),
   status: m.status ?? 0,
+  // The sites and companies this module actually reached. Lists, not single
+  // values: a module stores neither, and one course goes to people at several
+  // plants — the backend works them out from the allotment table. Empty on a
+  // module nobody has been given yet, which the grid draws as a dash.
+  plantIds: (m.plantIds ?? []).map(String),
+  compIds: (m.compIds ?? []).map(String),
   // The module's own registration stamp — the only date it carries. Nothing
   // records when a module was put in front of its departments: assignment
   // writes a row per employee and stamps none of them, and the module itself
@@ -62,9 +68,19 @@ const toModuleRow = (m) => ({
  * @returns {Promise<ModuleRow[]>}
  */
 export async function getModules(filter = {}) {
-  const params = {};
-  if (filter.financialYear) params.financialYear = filter.financialYear;
-  if (filter.quarter) params.quarter = filter.quarter;
+  // Built by hand rather than as a plain object: the id filters go as repeats
+  // of a parameter whose name literally contains "[]", which is what the
+  // backend's @RequestParam is called. The two scalars ride along in the same
+  // string so there is only one params object.
+  const params = new URLSearchParams();
+  if (filter.financialYear) params.set("financialYear", filter.financialYear);
+  if (filter.quarter) params.set("quarter", filter.quarter);
+  // A module stores no plant and no company, so the backend answers these from
+  // the sites its allottees work at — see getEmodulePageList.
+  (filter.companyIds ?? []).forEach((id) =>
+    params.append("companyIdList[]", id)
+  );
+  (filter.plantIds ?? []).forEach((id) => params.append("plantIdList[]", id));
 
   const list = unwrap(await api.get("/emodule/list", { params }), []) ?? [];
   return list.map(toModuleRow).sort((a, b) => b.id - a.id);

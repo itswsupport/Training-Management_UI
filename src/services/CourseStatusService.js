@@ -65,9 +65,31 @@ async function fetchRows(filter = {}) {
     postMarks: Number.isFinite(Number(r.postMarks)) && r.postMarks != null
       ? Number(r.postMarks)
       : null,
+    // The employee's site and legal entity, which this screen's own COMPANY and
+    // PLANT controls filter on. Strings, because the dropdowns carry their
+    // values as strings and a number would never match one. Empty where the
+    // employee master holds neither — those rows fall out of any narrowing,
+    // which is right: they belong to no company or plant that could be picked.
+    plantId: r.plantId ? String(r.plantId) : "",
+    compId: r.compId ? String(r.compId) : "",
     status: r.status ?? 0,
-  }));
+  })).sort(newestFirst);
 }
+
+/**
+ * Newest course first, as every grid in the app lists them.
+ *
+ * The report arrives in whatever order the join produced, which is neither the
+ * order courses were raised nor any other order an officer could name — so the
+ * newest request, which is the one being chased, could sit anywhere in 20,000
+ * rows. Module id stands in for "when it was raised": it is the auto-increment
+ * behind etms_emodule_master, so a higher id is a later course.
+ *
+ * Employee name breaks the tie, since one course carries a row per allottee and
+ * those would otherwise shuffle between loads.
+ */
+const newestFirst = (a, b) =>
+  b.moduleId - a.moduleId || a.empName.localeCompare(b.empName);
 
 /**
  * @param {{force?: boolean, financialYear?: string, quarter?: string}} [options]

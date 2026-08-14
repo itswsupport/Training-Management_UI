@@ -225,6 +225,7 @@ export function isQuarterClosed(validTill, today = new Date()) {
  *   departments: {id: number, name: string}[],
  *   grades: {id: number, label: string}[],
  *   plants: {id: number, name: string}[],
+ *   companies: {id: number, name: string}[],
  *   defaultQuarter: string,
  *   defaultFinancialYear: string
  * }>}
@@ -276,7 +277,14 @@ function toPlants(res) {
         name: clean(p.plantName),
         code: clean(p.plantCode),
       }))
-      .filter((p) => p.name.length > 0);
+      .filter((p) => p.name.length > 0)
+      // Ascending by what the field actually shows, which is code-first — the
+      // other four masters all sort and this one arrived in whatever order the
+      // backend held it. `numeric` is what keeps 1002 above 1010: compared as
+      // text, "1010" sorts before "1002" digit by digit.
+      .sort((a, b) =>
+        plantLabel(a).localeCompare(plantLabel(b), undefined, { numeric: true })
+      );
   } catch {
     return [];
   }
@@ -285,6 +293,65 @@ function toPlants(res) {
 /** "1001 — Rucha Engineers Pvt. Ltd. Unit-1"; just the name when uncoded. */
 export const plantLabel = (plant) =>
   plant?.code ? `${plant.code} — ${plant.name}` : (plant?.name ?? "");
+
+/**
+ * The company rows, or [] when this backend has no `/company/list`.
+ *
+ * Newer than every other master, so it is asked for defensively exactly as
+ * `/plant/list` is: a backend that predates it leaves COMPANY empty, and the
+ * form's chain then simply starts at PLANT instead of failing to load at all.
+ *
+ * The companies come from the EMS master schema — ETMS's own comp_master exists
+ * but has never had a row in it.
+ */
+function toCompanies(res) {
+  if (!res) return [];
+  try {
+    return (unwrap(res, []) ?? [])
+      .map((c) => ({ id: c.id, name: clean(c.compName) }))
+      .filter((c) => c.name.length > 0)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The company rows on their own, for a screen that wants the COMPANY control
+ * without the whole module form behind it — the Course Status filter bar.
+ *
+ * Defensive like the plants above: a backend without `/company/list` leaves the
+ * control empty rather than failing the screen it sits on.
+ *
+ * @returns {Promise<{id: number, name: string}[]>}
+ */
+export async function getCompanies() {
+  return toCompanies(await api.get("/company/list").catch(() => null));
+}
+
+/**
+ * The plants to offer, narrowed to the chosen companies.
+ *
+ * With no company picked this is every active plant, which is what
+ * `/plant/list` has always returned and what the form asks for on load.
+ *
+ * The backend derives this from the employee master — the plants actually
+ * staffed by those companies — because plant_mst carries no company column at
+ * all. One site is staffed by both companies and is correctly offered for
+ * either.
+ *
+ * Errors are left to the caller rather than swallowed into an empty list: an
+ * officer mid-way through the form must not lose their plant to a failed
+ * lookup. See `useAudienceOptions`, which keeps the previous list on a throw.
+ *
+ * @returns {Promise<{id: number, name: string, code: string}[]>}
+ */
+export async function getPlants({ companyIds = [] } = {}) {
+  const params = new URLSearchParams();
+  companyIds.forEach((id) => params.append("companyIdList[]", id));
+
+  return toPlants(await api.get("/plant/list", { params }));
+}
 
 /**
  * The departments to offer, narrowed to the chosen plants.
@@ -372,13 +439,15 @@ export async function getAllottedEmployees(emoduleId) {
 }
 
 export async function getModuleFormOptions() {
-  const [cat, inst, dept, grade, plant] = await Promise.all([
+  const [cat, inst, dept, grade, plant, company] = await Promise.all([
     api.get("/category/list"),
     api.get("/instructor/employee/list"),
     api.get("/department/list"),
     api.get("/grade/list"),
     // Caught rather than awaited bare — see toPlants.
     api.get("/plant/list").catch(() => null),
+    // Likewise, and for the same reason — see toCompanies.
+    api.get("/company/list").catch(() => null),
   ]);
 
   // Names repeat across the company, so the code is part of what is shown and
@@ -402,10 +471,19 @@ export async function getModuleFormOptions() {
       name: clean(d.deptName),
     })),
     plants: toPlants(plant),
-    grades: (unwrap(grade, []) ?? []).map((g) => ({
-      id: g.id,
-      label: gradeLabel(g),
-    })),
+    companies: toCompanies(company),
+    // Grade 0 — the master's own "All Grade" row — is left out: every grade
+    // field offers its own "All grades" tick, so carrying both put two ways of
+    // saying the same thing in one dropdown. The tick reaches the same people,
+    // since every serving employee is on a grade between M7 and S1. Grade 0 is
+    // still named in `masterLabels` below, so courses raised with it keep
+    // reading as "All Grade" in history.
+    grades: (unwrap(grade, []) ?? [])
+      .filter((g) => g?.id !== 0)
+      .map((g) => ({
+        id: g.id,
+        label: gradeLabel(g),
+      })),
     defaultQuarter: currentQuarter(),
     defaultFinancialYear: String(currentFinancialYear()),
   };

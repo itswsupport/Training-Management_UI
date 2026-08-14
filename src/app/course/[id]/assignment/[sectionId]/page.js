@@ -1,23 +1,17 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { use, useEffect, useRef, useState } from "react";
+import { use, useEffect, useState } from "react";
 
 import AssignmentForm from "@/components/course/AssignmentForm";
 import CourseNotice, { CourseLoading } from "@/components/course/CourseNotice";
-import { alerts } from "@/lib/alerts";
 import { apiErrorMessage } from "@/config/api";
-import { readScore, scoreLine } from "@/lib/assignmentScore";
 import { useAuth } from "@/context/AuthContext";
 import { useCourseAccess } from "@/hooks/useCourseAccess";
 import { decodeId, encodeId } from "@/lib/courseId";
 import { grantCourseAccess } from "@/lib/courseGrant";
 import { getEmpCode, isTrainingOfficer } from "@/lib/permissions";
-import {
-  DEFAULT_EXAM_TYPE,
-  EXAM_TYPES,
-  examTypeLabel,
-} from "@/lib/examType";
+import { DEFAULT_EXAM_TYPE, EXAM_TYPES } from "@/lib/examType";
 import {
   getAssignmentQuestions,
   getSubmittedAnswers,
@@ -85,9 +79,6 @@ export default function AssignmentPage({ params }) {
    * stand here carried one line and a link back — so the learner is simply put
    * back on the course. `replace` rather than `push`, or Back would land them
    * straight back on this redirect.
-   *
-   * An assignment already submitted takes the same exit, for its own reason —
-   * see `alreadySubmitted` below.
    */
   const nothingToSit = state.status === "empty";
 
@@ -98,59 +89,20 @@ export default function AssignmentPage({ params }) {
     router.replace(`/course/${encodeId(emoduleId)}`);
   }, [nothingToSit, emoduleId, router]);
 
-  /**
-   * A paper this learner has already sat.
+  /*
+   * A paper this learner has already sat opens with no announcement at all.
    *
-   * The paper IS put back on the screen, with the answers they gave already
-   * marked and nothing clickable. It used to be withheld — the learner was
-   * shown their score in an alert and sent straight back to the course — which
-   * left them no way to see what they had actually answered, and no way to read
-   * the questions again after the fact.
+   * It used to raise a dialog naming the paper and repeating that it could not
+   * be answered again. The paper itself is already on the screen behind it with
+   * every answer filled in and nothing clickable, so the dialog interrupted the
+   * learner to tell them what they were looking at — and it fired on a plain
+   * "view", which is not an action that warrants being stopped.
    *
-   * The score still arrives, in the same alert, once the paper is on screen
-   * behind it. It is the one thing the page cannot show inline: which answers
-   * were right is never sent to the browser, deliberately, so the marks are all
-   * there is to report.
-   *
-   * A training officer is excluded — they open this to check the paper rather
-   * than to sit it, so they get it blank.
+   * This also gave up the one thing the page cannot show inline: the score.
+   * Which answers were right is deliberately never sent to the browser, so the
+   * marks were all there was to report and the alert was the only place they
+   * appeared.
    */
-  const alreadySubmitted = state.status === "ready" && state.submitted && !readOnly;
-
-  // Fired once. React runs effects twice in development under StrictMode, and
-  // an awaited dialog is not idempotent the way the redirect above is.
-  const announced = useRef(false);
-
-  useEffect(() => {
-    if (!alreadySubmitted || announced.current) return;
-    announced.current = true;
-
-    (async () => {
-      const paper = state.examType ?? DEFAULT_EXAM_TYPE;
-      const label = examTypeLabel(paper);
-      const score = readScore(
-        empCode,
-        emoduleId,
-        sectionId,
-        paper,
-        access.retakes
-      );
-      const submittedText = `You have already submitted this ${label.toLowerCase()}, so your answers are shown below and cannot be changed.`;
-      await alerts.success(
-        // The score is missing only when this attempt was handed in from
-        // another browser, so it is left off rather than guessed at.
-        score ? `${scoreLine(score)} ${submittedText}` : submittedText,
-        `${label} submitted`
-      );
-    })();
-  }, [
-    alreadySubmitted,
-    empCode,
-    emoduleId,
-    sectionId,
-    state.examType,
-    access.retakes,
-  ]);
 
   useEffect(() => {
     if (!Number.isFinite(emoduleId) || !Number.isFinite(sectionId)) {
@@ -203,13 +155,6 @@ export default function AssignmentPage({ params }) {
         if (questions.length === 0) {
           setState({ status: "empty" });
         } else {
-          // The section's lectures, so each question can say which one it is
-          // about. Names only — the ids are what the questions carry.
-          const lectureNames = {};
-          (section.lectures ?? []).forEach((l) => {
-            lectureNames[l.id] = l.name;
-          });
-
           // Course content links here per lecture. Answers are saved question
           // by question either way; only the questions shown are narrowed.
           const lectureId = decodeId(
@@ -227,8 +172,6 @@ export default function AssignmentPage({ params }) {
             examType,
             questions: shown,
             allQuestions: questions,
-            lectureNames,
-            lectureName: lectureId ? lectureNames[lectureId] : "",
             submitted,
             // What this learner picked, so a paper already sat comes back with
             // its own answers marked rather than as a blank form. Only the
@@ -295,8 +238,6 @@ export default function AssignmentPage({ params }) {
       examType={state.examType}
       questions={state.questions}
       allQuestions={state.allQuestions}
-      lectureNames={state.lectureNames}
-      lectureName={state.lectureName}
       readOnly={readOnly}
       submitted={state.submitted}
       savedAnswers={state.savedAnswers}

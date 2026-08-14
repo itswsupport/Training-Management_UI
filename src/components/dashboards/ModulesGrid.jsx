@@ -10,6 +10,7 @@ import autoTable from "jspdf-autotable";
 
 import ExoMaterialTable from "@/components/ui/common/ExoMaterialTable";
 import ExportActions from "@/components/ui/common/ExportActions";
+import { audienceColumns, audienceFull } from "@/lib/audienceColumns";
 import { encodeId } from "@/lib/courseId";
 import {
   isQuarterUpcoming,
@@ -38,6 +39,9 @@ export default function ModulesGrid({
   title = "MODULES",
   headerColor = "#3482AE",
   emptyMessage = "No courses found",
+  // id → name for the COMPANY and PLANT columns; see useMasterNames.
+  companyNames = {},
+  plantNames = {},
 }) {
   // `data` is already the filtered set: the filter bar above the heading is
   // sent to the backend, which returns only the rows asked for. Nothing is
@@ -133,6 +137,10 @@ export default function ModulesGrid({
       // and a hand-back's remaining attempts are said on the course itself,
       // which has the room to explain what a returned course means rather than
       // shouting a red count across a table of ten.
+      // Straight after the course number, and before the course's own details:
+      // they say who the course is FOR, which is what the filter bar above
+      // narrows by first.
+      ...audienceColumns(companyNames, plantNames),
       { accessorKey: "name", header: "COURSE NAME" },
       { accessorKey: "category", header: "COURSE CATEGORY" },
       { accessorKey: "instructor", header: "COURSE INSTRUCTOR" },
@@ -163,12 +171,19 @@ export default function ModulesGrid({
         Cell: ({ row }) => row.original.assignedOn?.date || "—",
       },
     ],
-    [manage]
+    // The name maps arrive after the first render — they are fetched — so the
+    // columns rebuild when they land, or COMPANY and PLANT would read a dash
+    // for every row for as long as the screen is open.
+    [manage, companyNames, plantNames]
   );
 
   const getExportData = () =>
     rows.map((item) => ({
       "COURSE NO": item.no,
+      // Every name written out, not the "+N" the cell shows: a spreadsheet has
+      // no row-height problem to solve.
+      COMPANY: audienceFull(item.compIds, companyNames),
+      "PLANT CODE": audienceFull(item.plantIds, plantNames),
       "COURSE NAME": item.name,
       "COURSE CATEGORY": item.category,
       "COURSE INSTRUCTOR": item.instructor,

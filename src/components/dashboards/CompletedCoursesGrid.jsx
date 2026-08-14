@@ -9,6 +9,7 @@ import { Download, Eye } from "lucide-react";
 
 import ExoMaterialTable from "@/components/ui/common/ExoMaterialTable";
 import ExportActions from "@/components/ui/common/ExportActions";
+import { audienceColumns, audienceFull } from "@/lib/audienceColumns";
 import { alerts } from "@/lib/alerts";
 import { downloadCertificate } from "@/lib/certificate";
 import { encodeId } from "@/lib/courseId";
@@ -42,6 +43,9 @@ export default function CompletedCoursesGrid({
   onRetry,
   title = "COMPLETED COURSES",
   headerColor = "#20c997",
+  // id → name for the COMPANY and PLANT columns; see useMasterNames.
+  companyNames = {},
+  plantNames = {},
 }) {
   // Which row is being written, so its icon cannot be clicked twice while the
   // artwork loads.
@@ -76,6 +80,7 @@ export default function CompletedCoursesGrid({
           </Link>
         ),
       },
+      ...audienceColumns(companyNames, plantNames),
       { accessorKey: "name", header: "COURSE NAME" },
       { accessorKey: "category", header: "COURSE CATEGORY" },
       { accessorKey: "instructor", header: "COURSE INSTRUCTOR" },
@@ -137,13 +142,16 @@ export default function CompletedCoursesGrid({
       },
     ],
     // `downloading` is read inside a Cell, so the columns have to be rebuilt
-    // when it changes or the icon would never show as busy.
-    [downloading, handleDownload]
+    // when it changes or the icon would never show as busy. The name maps are
+    // fetched and arrive later, for the same reason.
+    [downloading, handleDownload, companyNames, plantNames]
   );
 
   const getExportData = () =>
     rows.map((item) => ({
       "COURSE NO": item.no,
+      COMPANY: audienceFull(item.compIds, companyNames),
+      "PLANT CODE": audienceFull(item.plantIds, plantNames),
       "COURSE NAME": item.name,
       "COURSE CATEGORY": item.category,
       "COURSE INSTRUCTOR": item.instructor,

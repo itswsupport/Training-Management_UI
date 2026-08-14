@@ -5,18 +5,19 @@ import { useEffect, useMemo, useState } from "react";
 import {
   getAudienceEmployees,
   getDepartments,
+  getPlants,
 } from "@/services/MasterDataService";
 
 /**
- * The two dependent lists behind a course's audience filters: the departments
- * to offer for the chosen plants, and the employees the three filters above
- * USER currently resolve to.
+ * The dependent lists behind a course's audience filters: the plants to offer
+ * for the chosen companies, the departments to offer for the chosen plants, and
+ * the employees the filters above USER currently resolve to.
  *
  * Shared by the Add Module form and the Edit Course Details form, which ask the
- * same question of the same four filters — plant, department, grade, then named
- * people. They held a copy each until this existed, and a copy is exactly where
- * the two would drift: the pruning below is what stops a course being sent to
- * someone the officer can no longer see in the field.
+ * same question of the same filters — company, plant, department, grade, then
+ * named people. They held a copy each until this existed, and a copy is exactly
+ * where the two would drift: the pruning below is what stops a course being sent
+ * to someone the officer can no longer see in the field.
  *
  * The employee list is fetched rather than filtered in the browser: the form's
  * roster carries names and codes only, so this side has no way to tell which
@@ -26,6 +27,11 @@ import {
  * @param {{id: number|string, name: string}[]} input.allDepartments every
  *   department, used before a plant is picked and as the fallback if the
  *   plant-wise lookup fails
+ * @param {{id: number|string, name: string}[]} [input.allPlants] likewise every
+ *   active plant, used before a company is picked
+ * @param {string[]} [input.companyIds]
+ * @param {Function} [input.setPlantIds] the plant state setter — called with an
+ *   updater to prune plants the chosen companies do not staff
  * @param {string[]} input.plantIds
  * @param {string[]} input.deptIds
  * @param {string[]} input.gradeIds
@@ -38,13 +44,17 @@ import {
  *   was already given to: an allottee who has since changed department is not
  *   in today's audience, and silently un-ticking them would read as the officer
  *   having taken them off the course.
- * @returns {{departments: Array, audienceOptions: Array, audienceLoading: boolean}}
+ * @returns {{plants: Array, departments: Array, audienceOptions: Array,
+ *   audienceLoading: boolean}}
  */
 export default function useAudienceOptions({
   allDepartments,
+  allPlants = [],
+  companyIds = [],
   plantIds,
   deptIds,
   gradeIds,
+  setPlantIds,
   setDeptIds,
   setEmpCodes,
   alwaysInclude = [],
@@ -56,8 +66,44 @@ export default function useAudienceOptions({
    * before a plant is chosen and stays usable if the lookup ever fails.
    */
   const [departments, setDepartments] = useState(allDepartments);
+  /**
+   * The plants to offer — company-wise once a company has been picked. Same
+   * shape as `departments` above, one link further up the chain.
+   */
+  const [plants, setPlants] = useState(allPlants);
   const [audience, setAudience] = useState([]);
   const [audienceLoading, setAudienceLoading] = useState(false);
+
+  useEffect(() => {
+    // Nothing to follow when the caller does not drive plants — the edit form
+    // fills PLANT from the course's own allotment, not from a company.
+    if (!setPlantIds) return undefined;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const rows = await getPlants({ companyIds });
+        if (cancelled) return;
+        setPlants(rows);
+        // A plant the newly chosen companies do not staff is no longer on
+        // offer, so it must not stay ticked behind the officer's back.
+        const available = new Set(rows.map((p) => String(p.id)));
+        setPlantIds((prev) => {
+          const kept = prev.filter((id) => available.has(id));
+          return kept.length === prev.length ? prev : kept;
+        });
+      } catch {
+        // Leave whatever is already listed rather than emptying the field, as
+        // the department lookup below does.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // setPlantIds is a state setter and stable; companyIds is what this follows.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyIds]);
 
   useEffect(() => {
     let cancelled = false;
@@ -149,5 +195,5 @@ export default function useAudienceOptions({
     return [...byCode.values()].sort((a, b) => a.label.localeCompare(b.label));
   }, [audience, deptIds, alwaysInclude]);
 
-  return { departments, audienceOptions, audienceLoading };
+  return { plants, departments, audienceOptions, audienceLoading };
 }

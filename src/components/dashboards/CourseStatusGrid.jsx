@@ -45,6 +45,15 @@ export default function CourseStatusGrid({
   // already in hand, and a round trip to hide two thirds of it would be slower
   // than the click that asked for it.
   status = STATUS_ALL,
+  // The officer's site and legal entity, narrowed the same way and for the same
+  // reason: both ride on the row out of the employee master. "" is every one of
+  // them, which is what the "All …" option on each control carries.
+  companyId = "",
+  plantId = "",
+  // id → name for the two columns below. The row carries ids only: it is built
+  // from the report, which has no idea what a company or a plant is called.
+  companyNames = {},
+  plantNames = {},
 }) {
   // The row whose feedback is open, or null. Held on the grid rather than in
   // the column definition so the panel survives the table re-rendering.
@@ -53,10 +62,14 @@ export default function CourseStatusGrid({
   // What the table, the empty state and every export all read, so a filtered
   // screen and a filtered export can never disagree.
   const rows = React.useMemo(() => {
-    if (status === STATUS_ALL) return data;
     const wantCompleted = status === STATUS_COMPLETED;
-    return data.filter((row) => (row.status === 2) === wantCompleted);
-  }, [data, status]);
+    return data.filter(
+      (row) =>
+        (status === STATUS_ALL || (row.status === 2) === wantCompleted) &&
+        (!companyId || row.compId === companyId) &&
+        (!plantId || row.plantId === plantId)
+    );
+  }, [data, status, companyId, plantId]);
 
   const columns = React.useMemo(
     () => [
@@ -75,6 +88,21 @@ export default function CourseStatusGrid({
               {row.original.no || "N/A"}
             </span>
           ),
+      },
+      // Straight after the course number, ahead of the employee: the two say
+      // WHOSE row this is at the widest level, and they are what the filter bar
+      // above narrows by first. A dash where the employee master holds neither —
+      // those rows are real and must not read as belonging to some company.
+      {
+        id: "company",
+        header: "COMPANY",
+        accessorFn: (row) => companyNames[row.compId] || "-",
+      },
+      {
+        id: "plant",
+        // The column carries the code, not the name — see audienceColumns.
+        header: "PLANT CODE",
+        accessorFn: (row) => plantNames[row.plantId] || "-",
       },
       { accessorKey: "empCode", header: "EMPLOYEE CODE" },
       { accessorKey: "empName", header: "EMPLOYEE NAME" },
@@ -169,12 +197,17 @@ export default function CourseStatusGrid({
         },
       },
     ],
-    []
+    // The two name maps arrive after the first render — they are fetched — so
+    // the columns have to be rebuilt when they land or COMPANY and PLANT would
+    // read a dash for every row for as long as the screen is open.
+    [companyNames, plantNames]
   );
 
   const getExportData = () =>
     rows.map((item) => ({
       "COURSE NO": item.no,
+      COMPANY: companyNames[item.compId] || "-",
+      "PLANT CODE": plantNames[item.plantId] || "-",
       "EMPLOYEE CODE": item.empCode,
       "EMPLOYEE NAME": item.empName,
       DESIGNATION: item.designation,

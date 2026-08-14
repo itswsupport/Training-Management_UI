@@ -62,8 +62,6 @@ export default function AssignmentForm({
   examType = DEFAULT_EXAM_TYPE,
   questions,
   allQuestions,
-  lectureNames = {},
-  lectureName = "",
   readOnly = false,
   submitted = false,
   savedAnswers = null,
@@ -243,7 +241,7 @@ export default function AssignmentForm({
       // straight to the feedback form with half the course still ahead of them.
       if (result.feedbackRequired) {
         await alerts.success(
-          `${score} That was the last assignment for this course. The feedback form is mandatory — until you submit it, this course will not be marked completed.`,
+          `${score} That was the last assignment for this course.`,
           `${paperLabel} submitted`
         );
         grantCourseAccess(emoduleId);
@@ -270,40 +268,30 @@ export default function AssignmentForm({
     <div className="bg-white rounded shadow border border-gray-200 overflow-hidden text-[12px]">
       {/* Header — no BACK button here: the course layout already provides one
           above, and CANCEL below returns to the course. */}
+      {/* Paper and course on the one heading. They were two bars — the blue one
+          naming the paper, a tinted one under it repeating "Course Name :" —
+          which spent two rows of the form on six words before a single question
+          appeared. The lecture rode along on the second bar and has gone with
+          it: this is the section's paper, not one lecture's. */}
       <div className="bg-[#3482AE] px-4 py-2">
-        <h2 className="text-white font-bold uppercase tracking-wide">
+        <h2 className="text-white font-bold tracking-wide uppercase">
           {examTypeLabel(examType)}
+          {courseName ? ` : ${courseName}` : ""}
         </h2>
       </div>
 
-      <div className="m-2 bg-[#cfe4f2] px-3 py-2 font-bold tracking-wide text-[#2f6685] uppercase">
-        Course Name : {courseName}
-        {lectureName ? <span> &nbsp;|&nbsp; Lecture : {lectureName}</span> : null}
-      </div>
-
-      {/* Says plainly why the button reads SAVE & CONTINUE rather than SUBMIT. */}
-      {!inert && !canFinalise ? (
-        <p className="mx-2 rounded border border-[#3482AE]/30 bg-[#eaf3f9] px-3 py-2 text-[12px] normal-case text-[#2f6685]">
-          {outstanding} question{outstanding === 1 ? "" : "s"} in other lectures
-          of this section are still unanswered. Your answers here are saved as
-          you go; the section is submitted once they are all done.
-        </p>
-      ) : null}
-
-      {/* Every inert case says why, because a form that quietly refuses to take
-          a click reads as broken. The SUBMIT / CANCEL pair is not rendered for
-          any of them. Overdue is checked first: a lapsed quarter is the reason
-          nothing can be sent, whatever else is also true of the paper. */}
+      {/* Overdue and preview say why, because a form that quietly refuses to
+          take a click reads as broken. A submitted paper says nothing: it is
+          the one case the learner already knows about — they sat it — and the
+          answers filled in below, with nothing clickable, show it plainly
+          enough without a paragraph over them. Overdue is checked first: a
+          lapsed quarter is the reason nothing can be sent, whatever else is
+          also true of the paper. */}
       {overdue ? (
         <p className="mx-2 rounded border border-[#dc3545] bg-[#dc3545]/10 px-3 py-2.5 text-[12px] normal-case text-[#c2384a]">
           This course is overdue. Its quarter has closed, so the assignment can
           be read but no longer answered or submitted. Please speak to your
           training officer.
-        </p>
-      ) : submitted ? (
-        <p className="mx-2 rounded border border-[#20c997] bg-[#20c997]/10 px-3 py-2.5 text-[12px] normal-case text-[#158765]">
-          You have already submitted this {examTypeLabel(examType).toLowerCase()} — it cannot be answered
-          again.
         </p>
       ) : readOnly ? (
         <p className="mx-2 rounded border border-[#ffc107] bg-[#ffc107]/10 px-3 py-2.5 text-[12px] normal-case text-[#a17200]">
@@ -315,13 +303,10 @@ export default function AssignmentForm({
       <ol>
         {questions.map((question) => (
           <li key={question.id} className="border-t border-gray-200 px-4 py-3.5">
-            {/* Questions written before assignments were lecture-wise carry no
-                lecture, so the label is simply left off for those. */}
-            {lectureNames[question.lectureId] ? (
-              <p className="mb-1 text-[11px] font-semibold tracking-wide text-[#3482AE] uppercase">
-                {lectureNames[question.lectureId]}
-              </p>
-            ) : null}
+            {/* No lecture name over the question. The paper is the section's,
+                and naming the lecture each question came from put a second
+                heading above the first one and read as a group label for
+                everything under it. */}
             <p className="mb-3 text-[12px] leading-snug font-bold text-gray-800 uppercase">
               {question.text}
             </p>

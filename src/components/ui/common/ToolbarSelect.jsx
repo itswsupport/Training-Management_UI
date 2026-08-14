@@ -35,6 +35,12 @@ export const filterFieldCls =
  *   makes a year read as a date control rather than as one more list. It stands
  *   in for the chevron rather than joining it: two glyphs at the same end say
  *   the field opens twice.
+ * @param {string} [props.fieldClassName] width for the closed field, where the
+ *   longest option would otherwise set it. A <select> sizes itself to its widest
+ *   entry, so one list of plant names — "1042 — Rucha Engineers Pvt. Ltd. Unit-
+ *   4, PressShop" — stretches the control far past what its own label needs and
+ *   pushes the rest of the bar onto a second line. The full text is still there
+ *   when the list is open, which is where it is actually read.
  */
 export default function ToolbarSelect({
   label,
@@ -42,6 +48,7 @@ export default function ToolbarSelect({
   onChange,
   options,
   icon: Icon,
+  fieldClassName = "",
 }) {
   const Adornment = Icon ?? ChevronDown;
 
@@ -54,7 +61,7 @@ export default function ToolbarSelect({
         <select
           value={value}
           onChange={(event) => onChange(event.target.value)}
-          className={`${filterFieldCls} cursor-pointer appearance-none pr-8 font-medium`}
+          className={`${filterFieldCls} cursor-pointer appearance-none truncate pr-8 font-medium ${fieldClassName}`}
         >
           {options.map((option) => (
             <option key={option.value} value={option.value}>

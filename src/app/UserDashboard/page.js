@@ -15,6 +15,7 @@ import CompletedCoursesGrid from "@/components/dashboards/CompletedCoursesGrid";
 import FilterBar from "@/components/dashboards/FilterBar";
 import ModulesGrid from "@/components/dashboards/ModulesGrid";
 import QuarterFilters from "@/components/dashboards/QuarterFilters";
+import useMasterNames from "@/hooks/useMasterNames";
 import { useAuth } from "@/context/AuthContext";
 import {
   LEARNER_FILTER_KEY,
@@ -75,12 +76,12 @@ export default function UserDashboard() {
 
   // One selection across all four tabs, on its own key so a learner who is also
   // a training officer does not carry one screen's filter into the other. Opens
-  // on every year and quarter, unlike the officer's screens: a learner has to be
-  // able to see a course the moment it is assigned, including one raised for a
-  // quarter — or a year — still ahead.
-  const filter = useQuarterFilter(LEARNER_FILTER_KEY, {
-    openOnEverything: true,
-  });
+  // on the year and quarter in progress, the same as the officer's screens, so
+  // the dashboard always says which period it is showing.
+  const filter = useQuarterFilter(LEARNER_FILTER_KEY);
+
+  // Names for the grids' COMPANY and PLANT columns.
+  const { companyNames, plantNames } = useMasterNames();
 
   const [activeTab, setActiveTab] = useState("pending");
   const [data, setData] = useState([]);
@@ -168,6 +169,8 @@ export default function UserDashboard() {
             onRetry={fetchCourses}
             title={active.header}
             headerColor={active.accent}
+            companyNames={companyNames}
+            plantNames={plantNames}
           />
         ) : (
           <ModulesGrid
@@ -178,6 +181,8 @@ export default function UserDashboard() {
             title={active.header}
             headerColor={active.accent}
             emptyMessage={`No ${active.label.toLowerCase()} courses found`}
+            companyNames={companyNames}
+            plantNames={plantNames}
           />
         )}
       </main>

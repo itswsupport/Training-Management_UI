@@ -297,14 +297,16 @@ export default function CourseViewPage({ params }) {
         <div className="flex h-full min-w-0 flex-col overflow-hidden rounded border border-gray-200 bg-white text-[12px] shadow">
           <div className="flex flex-col gap-3 bg-gradient-to-r from-[#3482AE] to-[#2b6b90] px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
-              <div className="mb-1.5 flex flex-wrap items-center gap-2">
-                <p className="inline-flex items-center rounded bg-white/15 px-2 py-0.5 text-[11px] font-bold tracking-[0.12em] text-white uppercase ring-1 ring-white/25">
-                  {course.code || "Training Course"}
-                </p>
-                {/* A course the learner has already finished still looks
-                    finished — this is the only sign that the officer has put
-                    something new in it since. */}
-                {update ? (
+              {/* A course the learner has already finished still looks
+                  finished — this is the only sign that the officer has put
+                  something new in it since.
+
+                  The whole row is conditional now that the course code has
+                  moved down into the heading: an always-rendered wrapper would
+                  leave its bottom margin behind as a gap above the title on
+                  every course that has no update. */}
+              {update ? (
+                <div className="mb-1.5 flex flex-wrap items-center gap-2">
                   <span
                     title={`${update.description || "Course content updated"} — ${update.when}`}
                     className="inline-flex items-center gap-1 rounded bg-[#ffc107] px-2 py-0.5 text-[11px] font-bold tracking-[0.08em] text-[#5a4300] uppercase"
@@ -312,9 +314,16 @@ export default function CourseViewPage({ params }) {
                     <Sparkles className="h-3 w-3" />
                     New content
                   </span>
-                ) : null}
-              </div>
+                </div>
+              ) : null}
+              {/* Code and name on one line, "[NO-FT-291] Novel test module".
+                  The code was a pill on its own row above the title, which cost
+                  a line of the hero to six characters. Bracketed rather than
+                  merely prefixed so it still reads as a reference and not as
+                  the first word of the course name. Left off entirely when a
+                  course has no code — "[Training Course] …" would read as one. */}
               <h2 className="text-xl leading-snug font-bold normal-case text-white">
+                {course.code ? `[${course.code}] ` : ""}
                 {course.name}
               </h2>
               <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -408,13 +417,6 @@ export default function CourseViewPage({ params }) {
                 This course has been updated since you completed it — the
                 trainer added new material on {update.when}. Your certificate
                 still stands; open the sections below to see what is new.
-              </p>
-            ) : null}
-
-            {feedbackDue ? (
-              <p className="rounded border border-[#dc3545]/30 bg-[#dc3545]/5 px-3 py-2.5 text-xs normal-case text-[#dc3545]">
-                All assignments are submitted. The feedback form is mandatory —
-                until you submit it, this course will not be marked completed.
               </p>
             ) : null}
 

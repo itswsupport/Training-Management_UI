@@ -827,6 +827,7 @@ export default function ModuleForm({
     ? quarter
     : (quarterChoices[0]?.value ?? "");
   const [objectives, setObjectives] = useState([""]);
+  const [companyIds, setCompanyIds] = useState([]);
   const [plantIds, setPlantIds] = useState([]);
   const [deptIds, setDeptIds] = useState([]);
   const [gradeIds, setGradeIds] = useState([]);
@@ -834,35 +835,42 @@ export default function ModuleForm({
   const [sections, setSections] = useState([]);
 
   /**
-   * The departments to offer for the chosen plants, and the people the three
-   * filters above SELECT USER currently resolve to. Shared with the officer's
-   * edit form, which narrows the same four filters the same way.
+   * The plants to offer for the chosen companies, the departments for the
+   * chosen plants, and the people the four filters above SELECT USER currently
+   * resolve to. Shared with the officer's edit form, which narrows the same
+   * filters the same way.
    */
-  const { departments, audienceOptions, audienceLoading } = useAudienceOptions({
-    allDepartments: options.departments,
-    plantIds,
-    deptIds,
-    gradeIds,
-    setDeptIds,
-    setEmpCodes,
-  });
+  const { plants, departments, audienceOptions, audienceLoading } =
+    useAudienceOptions({
+      allDepartments: options.departments,
+      allPlants: options.plants,
+      companyIds,
+      plantIds,
+      deptIds,
+      gradeIds,
+      setPlantIds,
+      setDeptIds,
+      setEmpCodes,
+    });
 
   /**
-   * The audience chain, one field at a time: PLANT → DEPARTMENT → GRADE →
-   * SELECT USER. Each stays shut until the one above it is answered, so the
-   * officer narrows in the order the filters actually narrow — site, then
-   * function, then seniority, then named people — rather than picking grades
-   * out of the whole company and departments out of all 64 before saying which
-   * site they mean.
+   * The audience chain, one field at a time: COMPANY → PLANT → DEPARTMENT →
+   * GRADE → SELECT USER. Each stays shut until the one above it is answered, so
+   * the officer narrows in the order the filters actually narrow — legal entity,
+   * then site, then function, then seniority, then named people — rather than
+   * picking grades out of the whole group and departments out of all 64 before
+   * saying which site they mean.
    *
-   * The first gate is guarded on the plant list actually having plants in it,
-   * not on the selection alone: `/plant/list` is newer than the other masters
-   * and comes back empty against a backend that predates it. Gating on an empty
-   * field there would leave an officer unable to pick a plant, therefore unable
-   * to pick a department, and unable to raise a course at all — so where there
-   * are no plants to choose, the chain simply starts at DEPARTMENT.
+   * Each gate is guarded on its own list actually having rows in it, not on the
+   * selection alone: `/company/list` and `/plant/list` are newer than the other
+   * masters and come back empty against a backend that predates them. Gating on
+   * an empty field would leave an officer unable to pick a company, therefore
+   * unable to pick anything below it, and unable to raise a course at all — so
+   * where there are no companies the chain starts at PLANT, and where there are
+   * no plants either it starts at DEPARTMENT.
    */
-  const deptLocked = options.plants.length > 0 && plantIds.length === 0;
+  const plantLocked = options.companies.length > 0 && companyIds.length === 0;
+  const deptLocked = plantLocked || (plants.length > 0 && plantIds.length === 0);
   const gradeLocked = deptLocked || deptIds.length === 0;
   const userLocked = gradeLocked || gradeIds.length === 0;
 
@@ -878,6 +886,16 @@ export default function ModuleForm({
    * separately prunes picks that a *narrowed* filter no longer offers, which is
    * a different question and already has its own answer.
    */
+  const changeCompanies = (next) => {
+    setCompanyIds(next);
+    if (next.length === 0) {
+      setPlantIds([]);
+      setDeptIds([]);
+      setGradeIds([]);
+      setEmpCodes([]);
+    }
+  };
+
   const changePlants = (next) => {
     setPlantIds(next);
     if (next.length === 0) {
@@ -1080,28 +1098,59 @@ export default function ModuleForm({
             />
           </Field>
 
-          {/* Plant, Department and Grade are the three filters that decide who
-              the course reaches, so they sit together on one row in the order
-              they narrow by: site, then function, then seniority.
+          {/* Company, Plant, Department and Grade are the filters that decide
+              who the course reaches, so they sit together in the order they
+              narrow by: legal entity, then site, then function, then seniority.
 
-              The order is now enforced rather than merely suggested: DEPARTMENT
-              stays shut until a plant is picked. It is the same rule SELECT USER
-              already applies one step down the chain, and it stops the officer
-              choosing from all 64 departments — most of which are not staffed at
-              the site they have in mind — before saying which site that is. */}
+              The order is enforced rather than merely suggested: each field
+              stays shut until the one above it is picked. It is the same rule
+              SELECT USER already applies at the end of the chain, and it stops
+              the officer choosing from all 64 departments — most of which are
+              not staffed at the site they have in mind — before saying which
+              site that is. */}
+          <Field label="COMPANY:">
+            <MultiSelect
+              // Name only: the two companies share no code worth showing, and
+              // comp_code is null on both rows in the master anyway.
+              options={options.companies.map((c) => ({
+                value: String(c.id),
+                label: c.name,
+              }))}
+              selected={companyIds}
+              onChange={changeCompanies}
+              placeholder={
+                options.companies.length === 0
+                  ? "No companies"
+                  : "Select company(s)"
+              }
+              searchPlaceholder="Search company…"
+              allLabel="All companies"
+            />
+          </Field>
+
           <Field label="PLANT:">
             <MultiSelect
               // The code leads the label: it is what the plants are known by
               // on paper, and it is the only short way to tell "Unit-4
               // Toolroom" from "Unit-4 R&D" and "Unit-4, PressShop" at a
               // glance. It is searchable too, so "1042" finds the right one.
-              options={options.plants.map((p) => ({
+              //
+              // Narrowed to the chosen companies — plant_mst has no company
+              // column, so the backend answers this from the employee master.
+              options={plants.map((p) => ({
                 value: String(p.id),
                 label: plantLabel(p),
               }))}
               selected={plantIds}
               onChange={changePlants}
-              placeholder="Select plant(s)"
+              disabled={plantLocked}
+              placeholder={
+                plantLocked
+                  ? "Select company first"
+                  : plants.length === 0
+                    ? "No plants for this company"
+                    : "Select plant(s)"
+              }
               searchPlaceholder="Search plant name or code…"
               allLabel="All plants"
             />
@@ -1123,7 +1172,9 @@ export default function ModuleForm({
               // broken — the same job the empty SELECT USER does below.
               placeholder={
                 deptLocked
-                  ? "Select plant first"
+                  ? plantLocked
+                    ? "Select company first"
+                    : "Select plant first"
                   : plantIds.length > 0
                     ? "Select department(s) at these plants"
                     : "Select department(s)"
@@ -1152,9 +1203,10 @@ export default function ModuleForm({
               searchPlaceholder="Search grade…"
               // Ticking this reaches the same people as the master's own "All
               // Grade" row: every serving employee is on a grade between M7 and
-              // S1, so selecting all of them leaves nobody out. Both ways of
-              // saying it are therefore offered rather than one being removed —
-              // "All Grade" is what courses raised before this were stored with.
+              // S1, so selecting all of them leaves nobody out. That row is
+              // dropped from the options in MasterDataService rather than shown
+              // beside this tick — one dropdown offering "All Grade" and "All
+              // grades" read as two different things.
               allLabel="All grades"
             />
           </Field>
@@ -1164,23 +1216,25 @@ export default function ModuleForm({
               grade the seniorities, and this picks named people out of whoever
               is left. Leaving it empty keeps all of them.
 
-              One column, like every other field on this row. It was two wide
-              to give the employee labels room — they carry the code as well as
-              the name — but that made it the odd one out on a form whose whole
-              grid is otherwise even, and the badges inside it truncate rather
-              than overflow anyway. */}
+              One column, like every other field on this row: it was two wide
+              once to give the employee labels room, but that made it the odd
+              one out on a form whose grid is otherwise even. The labels get
+              their room by wrapping downwards instead, so the field grows a
+              line at a time rather than taking a second column. */}
           <Field label="SELECT USER:">
             <MultiSelect
-              // The code alone. Names carry the code as well, and a badge of
-              // "MANIKUTTAN NAIR (100098)" truncated inside a one-column field
-              // showed neither the whole name nor the code — which is the one
-              // part of it that identifies the person. The name is still what
-              // typing searches, and it is on the row's hover title.
+              // Name and code together — "MANIKUTTAN NAIR (100098)" — in the
+              // list AND on the badges once picked. A field of bare codes gave
+              // the officer nothing to recognise a person by, so both choosing
+              // someone and checking who was already chosen meant hovering each
+              // row in turn.
               options={audienceOptions.map((e) => ({
                 value: e.code,
-                label: e.code,
-                search: e.label,
+                label: e.label,
               }))}
+              // Those labels do not fit a one-column field on a single line, so
+              // this one is allowed to grow taller instead of clipping them.
+              wrapBadges
               selected={empCodes}
               onChange={setEmpCodes}
               disabled={userLocked}
@@ -1190,19 +1244,21 @@ export default function ModuleForm({
               // nobody. Kept short enough to fit the narrower field without
               // clipping.
               placeholder={
-                deptLocked
-                  ? "Select plant first"
-                  : deptIds.length === 0
-                    ? "Select department first"
-                    : gradeIds.length === 0
-                      ? "Select grade first"
-                      : audienceLoading
-                        ? "Loading employees…"
-                        : audienceOptions.length === 0
-                          ? "No matching employees"
-                          : `All ${audienceOptions.length} employee${
-                              audienceOptions.length === 1 ? "" : "s"
-                            }`
+                plantLocked
+                  ? "Select company first"
+                  : deptLocked
+                    ? "Select plant first"
+                    : deptIds.length === 0
+                      ? "Select department first"
+                      : gradeIds.length === 0
+                        ? "Select grade first"
+                        : audienceLoading
+                          ? "Loading employees…"
+                          : audienceOptions.length === 0
+                            ? "No matching employees"
+                            : `All ${audienceOptions.length} employee${
+                                audienceOptions.length === 1 ? "" : "s"
+                              }`
               }
               searchPlaceholder="Search employee name or code…"
               allLabel={
@@ -1213,36 +1269,34 @@ export default function ModuleForm({
             />
           </Field>
 
-          {/* Financial year rides up into the main grid rather than heading the
-              last row. Making USER one column wide left the third cell of its
-              row empty, and a hole in an otherwise even grid reads as a field
-              that failed to render. It also puts the year beside the audience
-              filters, which is where the officer is already looking. */}
-          <Field label="FINANCIAL YEAR:">
-            <YearPicker
-              label=""
-              value={financialYear}
-              onChange={setFinancialYear}
-              allowAll={false}
-              minYear={earliestYear}
-              triggerClassName={inputCls}
-            />
-          </Field>
+          {/* Year, quarter and objective take the last row together. The outer
+              grid is three equal columns and cannot express "narrow, narrow,
+              wide", so this row runs its own twelve-column grid: the year holds
+              four digits and the quarter one short value, while the objective is
+              free text that grows a line per entry and so takes the rest.
 
-          {/* Quarter and objective take the last row. The outer grid is three
-              equal columns and cannot express "narrow, wide", so this row runs
-              its own twelve-column grid: the dropdown holds one short value and
-              the objective is free text that grows a line per entry, and so
-              takes the rest.
+              Year first and quarter straight after it, which matters — the
+              quarters on offer depend on the year chosen, so they have to be
+              read in that order and are now side by side to be.
 
               items-start, not the grid's stretch: a cell that stretches makes
               its field as tall as the tallest column, so adding a second
-              objective grew the quarter box to match it. Each field keeps its
-              own height and both labels stay on one line.
-
-              The quarter still follows the year immediately in reading order,
-              which matters — the quarters on offer depend on the year chosen. */}
+              objective grew the other two boxes to match it. Each field keeps
+              its own height and every label stays on one line. */}
           <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-12 items-start gap-x-6 gap-y-4">
+            <div className="md:col-span-2">
+              <Field label="FINANCIAL YEAR:">
+                <YearPicker
+                  label=""
+                  value={financialYear}
+                  onChange={setFinancialYear}
+                  allowAll={false}
+                  minYear={earliestYear}
+                  triggerClassName={inputCls}
+                />
+              </Field>
+            </div>
+
             <div className="md:col-span-3">
               <Field label="APPLICABLE QUARTER:">
                 <SearchableSelect
@@ -1255,7 +1309,7 @@ export default function ModuleForm({
               </Field>
             </div>
 
-            <div className="md:col-span-9">
+            <div className="md:col-span-7">
               <span className={labelCls}>LEARNING OBJECTIVE:</span>
               <div className="space-y-2">
                 {objectives.map((obj, i) => (

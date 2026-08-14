@@ -32,13 +32,8 @@ export const LEARNER_FILTER_KEY = "etms_learner_quarter_filter";
  * @param {string} [storageKey] which screens share one selection. The officer's
  *   two screens are one working context; a learner's dashboard is another, and
  *   the same person opening both should not find one filtered by the other.
- * @param {{openOnEverything?: boolean}} [options] `openOnEverything` opens on
- *   every year and quarter instead of the one in progress — see below.
  */
-export function useQuarterFilter(
-  storageKey = OFFICER_FILTER_KEY,
-  { openOnEverything = false } = {}
-) {
+export function useQuarterFilter(storageKey = OFFICER_FILTER_KEY) {
   // Opens on the year and quarter in progress, which is what an officer is
   // working on nearly every time they arrive. Widening to an older quarter, or
   // to every year, is one control away — so there is no Clear button, and a
@@ -60,28 +55,29 @@ export function useQuarterFilter(
       /* an unreadable value simply falls back to the default below */
     }
 
-    // A learner opens on everything they have been given, not on the quarter in
-    // progress. Their list is a to-do list rather than a report: a course raised
-    // for a quarter still ahead is theirs from the day it is assigned — that is
-    // the whole point of raising it early — and one raised for a year ahead sat
-    // behind a year filter nobody would think to move, so it may as well not
-    // have been assigned. The quarter in progress is still one control away, and
-    // the courses outside it are shown for what they are: a future one carries
-    // its locked badge, and every row names its own year and quarter.
-    const fallback = openOnEverything
-      ? { year: ANY_YEAR, quarter: ANY_QUARTER }
-      : {
-          year: String(currentFinancialYear()),
-          quarter: currentQuarter(),
-        };
+    // Every screen opens on the year and quarter in progress — the learner's
+    // dashboard included, which used to open on "All years, all quarters". A
+    // dashboard that shows everything at once never says which period it is
+    // reporting, and the learner had no way to tell that the list spanned
+    // several.
+    //
+    // The cost is that a course raised for a quarter or a year still ahead no
+    // longer shows on arrival: it is assigned from that day, but now sits behind
+    // the filter until the learner widens it, or until its quarter comes round.
+    // Both controls are one click, and this is how the officer's screens have
+    // always behaved.
+    const fallback = {
+      year: String(currentFinancialYear()),
+      quarter: currentQuarter(),
+    };
 
     // An empty year is "All years", and it is deliberately NOT restored: a
     // screen opened fresh should say which year it is showing, and restoring
     // that choice left the heading reading "All years" with no sign of why.
     // Widening is a working step, not a setting — it lasts as long as the
-    // screen does, and a refresh puts the year in progress back. On a screen
-    // that opens on everything this is a no-op: the fallback it lands on is
-    // "All years" too.
+    // screen does, and a refresh puts the year in progress back. This now
+    // applies to the learner's dashboard too, which used to land on "All years"
+    // itself and so had nothing to restore.
     setFilter(
       stored && typeof stored === "object"
         ? {
@@ -92,7 +88,7 @@ export function useQuarterFilter(
           }
         : fallback
     );
-  }, [storageKey, openOnEverything]);
+  }, [storageKey]);
 
   const update = useCallback((next) => {
     setFilter((prev) => {

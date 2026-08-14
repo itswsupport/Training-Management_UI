@@ -276,18 +276,16 @@ function AssignmentRow({
         </span>
         <span className="min-w-0 flex-1 text-[12px] normal-case text-gray-600">
           {count} question{count === 1 ? "" : "s"}
-          {/* Each state says what the learner is to do about it, in the same
-              plain voice. "Sit this", which the two hints used to open with,
-              is the British exam idiom and was read here as a typo for
-              something else — nobody on this floor says they are sitting an
-              assignment. */}
+          {/* Only the two states the learner cannot act on say anything. The
+              hints that used to follow — "complete this before you start the
+              lectures below", and its post-assignment twin — told a learner
+              looking at a row with a live button on it to do the thing the
+              button already offers. */}
           {submitted
-            ? " — already submitted."
+            ? " — already submitted, so your answers can be read but no longer changed."
             : locked
               ? ` — ${lockedReason}`
-              : isPost
-                ? " — complete this after you finish all the lectures above."
-                : " — complete this before you start the lectures below."}
+              : null}
         </span>
         {href ? (
           submitted ? (

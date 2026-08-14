@@ -46,9 +46,13 @@ function RemoveBadgeBtn({ label, onRemove }) {
  * already made stay selected.
  *
  * @param {{value: string, label: string, search?: string}[]} options `search` is
- *   what typing matches against when it is not the label — the employee field
- *   shows bare codes but is still searched by name, and a list of codes that
- *   only answered to codes would be unusable.
+ *   what typing matches against when it is not the label.
+ * @param {boolean} [wrapBadges] let the chosen badges run onto further lines at
+ *   their full width, instead of being capped at 45% of the field and truncated
+ *   to fit one. The control then grows in height with the selection rather than
+ *   keeping one — which is the trade the employee field makes, because
+ *   "MANIKUTTAN NAIR (100098)" clipped to "MANIKUTTAN N…" loses the code, and
+ *   the code is the half that tells two same-named people apart.
  * @param {string} [allLabel] when given, an "All …" row is offered above the
  *   list that ticks or clears everything at once. It is a real checkbox rather
  *   than a link because it also has to READ as the current state: a field with
@@ -67,6 +71,7 @@ export default function MultiSelect({
   searchPlaceholder = "Type to search…",
   allLabel = "",
   disabled = false,
+  wrapBadges = false,
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -169,7 +174,11 @@ export default function MultiSelect({
             : "cursor-pointer border-gray-300 bg-white"
         }`}
       >
-        <span className="flex min-w-0 flex-1 flex-nowrap items-center gap-1.5 overflow-hidden">
+        <span
+          className={`flex min-w-0 flex-1 items-center gap-1.5 ${
+            wrapBadges ? "flex-wrap" : "flex-nowrap overflow-hidden"
+          }`}
+        >
           {allLabel && allSelected ? (
             // One badge instead of three-plus-a-count: "all of them" is the
             // thing being said, and spelling out the first three implies a
@@ -188,7 +197,9 @@ export default function MultiSelect({
             shown.map((o) => (
               <span
                 key={o.value}
-                className="flex max-w-[45%] shrink-0 items-center gap-1 rounded-full bg-[#3482AE]/10 py-1 pr-1 pl-2.5 text-[11px] font-semibold text-[#2a6a8f] ring-1 ring-[#3482AE]/20"
+                className={`flex shrink-0 items-center gap-1 rounded-full bg-[#3482AE]/10 py-1 pr-1 pl-2.5 text-[11px] font-semibold text-[#2a6a8f] ring-1 ring-[#3482AE]/20 ${
+                  wrapBadges ? "max-w-full" : "max-w-[45%]"
+                }`}
               >
                 <span className="truncate">{o.label}</span>
                 {disabled ? null : (
@@ -251,8 +262,9 @@ export default function MultiSelect({
               filtered.map((o) => (
                 <label
                   key={o.value}
-                  // Whatever the row does not spell out, on hover — a field of
-                  // bare employee codes is otherwise unreadable.
+                  // Whatever the row does not spell out, on hover. Rows that
+                  // already say everything simply repeat themselves here, which
+                  // costs nothing.
                   title={o.search ?? o.label}
                   className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-[12px] hover:bg-[#eaf3f9]"
                 >

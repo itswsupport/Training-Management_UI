@@ -206,10 +206,23 @@ export async function getUserCourses(empCode, status, filter = {}) {
       retakes: Number(row.retakeCount) || 0,
       attemptsLeft: attemptsLeftOf(row.retakeCount, row.status ?? status),
       empName: fullName(u.employeeFname, u.employeeLname),
+      // The learner's own site and company, off their employee record. Lists of
+      // one, so the grids can read these the same way they read a module's —
+      // where the same course reaches several plants at once.
+      plantIds: u.plant_id ? [String(u.plant_id)] : [],
+      compIds: u.companyId ? [String(u.companyId)] : [],
     };
   });
 
-  return applyForcedOverdue(rows, status);
+  // Newest course first, as the officer's grids list them. The backend returns
+  // these in allotment order, which put a course raised months ago above one
+  // assigned this morning. `id` is the module id — the auto-increment behind
+  // etms_emodule_master — so a higher one is a later course.
+  //
+  // Awaited before sorting: applyForcedOverdue is async — it may have to fetch
+  // the forced rows — so sorting its return value directly sorts the promise.
+  const withForced = await applyForcedOverdue(rows, status);
+  return withForced.sort((a, b) => b.id - a.id);
 }
 
 /**

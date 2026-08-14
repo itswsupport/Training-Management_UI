@@ -332,12 +332,13 @@ export default function CourseDetailsEditor({ course, options, ref }) {
 
         <Field label="SELECT USER:">
           <MultiSelect
-            // Codes only, as on the Add Module form — see the note there.
+            // Name and code, in the list and on the badges — as on the Add
+            // Module form; see the note there.
             options={audienceOptions.map((e) => ({
               value: e.code,
-              label: e.code,
-              search: e.label,
+              label: e.label,
             }))}
+            wrapBadges
             selected={empCodes}
             onChange={setEmpCodes}
             // The empty field has to explain itself — it reads as broken

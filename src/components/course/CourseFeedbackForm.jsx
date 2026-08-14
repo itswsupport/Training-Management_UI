@@ -124,23 +124,15 @@ export default function CourseFeedbackForm({
     <div className="bg-white rounded shadow border border-gray-200 overflow-hidden text-[12px]">
       {/* Header — no BACK button here: the course layout already provides one
           above, and CANCEL below returns to the course. */}
+      {/* Form and course on the one heading, as the assignment carries them.
+          They were two bars with a covering note under both, which spent three
+          rows on saying what the first row already said. */}
       <div className="bg-[#3482AE] px-4 py-2">
-        <h2 className="text-white font-bold uppercase tracking-wide">
+        <h2 className="text-white font-bold tracking-wide uppercase">
           Training Feedback Form
+          {courseName ? ` : ${courseName}` : ""}
         </h2>
       </div>
-
-      <div className="m-2 bg-[#cfe4f2] px-3 py-2 font-bold tracking-wide text-[#2f6685] uppercase">
-        Course Name : {courseName}
-      </div>
-
-      <p className="border-b border-gray-200 px-4 py-3 text-xs normal-case leading-relaxed text-gray-700">
-        Dear Trainees,
-        <br />
-        Thank you for participating in our online training program. Your feedback
-        is valuable to us and will help us improve our training modules. Please
-        take a few moments to complete this feedback form.
-      </p>
 
       <ol>
         {questions.map((question, index) => (

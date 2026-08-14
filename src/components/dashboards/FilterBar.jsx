@@ -9,9 +9,10 @@
  * borrows the heading colour of whichever grid it belongs to, which is what
  * ties the pair together on a page carrying more than one.
  *
- * The word alone, with no icon beside it: the funnel and its neighbours belong
- * to the table's own toolbar on the right, and a second filter glyph over here
- * would read as another control of the same kind rather than as a heading.
+ * No "Filters" heading on the bar. Every control in it is already labelled with
+ * the thing it filters, so the word only repeated what the row plainly was, and
+ * on the screens carrying five of them it was taking width off the controls
+ * that needed it.
  *
  * @param {object} props
  * @param {string} [props.accent] the grid's header colour
@@ -23,9 +24,6 @@ export default function FilterBar({ accent = "#3482AE", children }) {
       className="mb-3 flex flex-wrap items-center gap-x-6 gap-y-3 rounded border border-gray-200 border-l-4 bg-white px-4 py-2.5 shadow-sm"
       style={{ borderLeftColor: accent }}
     >
-      <span className="text-[11px] font-bold tracking-wide text-gray-400 uppercase">
-        Filters
-      </span>
       {children}
     </div>
   );
