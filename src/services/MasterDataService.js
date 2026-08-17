@@ -517,29 +517,34 @@ function idNames(res, name) {
 }
 
 /**
- * The three masters the module history stores as bare ids.
+ * The four masters the module history stores as bare ids.
  *
- * A history snapshot keeps a course's category, departments and grades the way
- * the module row does — as ids — so an edit reads `Category: 3 → 7` until the
- * ids are put back through the lists they came from. See `snapshotText` in
- * TransactionService, which is what spends this.
+ * A history snapshot keeps a course's category, departments, grades and plants
+ * the way the module row does — as ids — so an edit reads `Category: 3 → 7`
+ * until the ids are put back through the lists they came from. See
+ * `snapshotText` in TransactionService, which is what spends this.
  *
  * Each list is caught on its own: a master that cannot be reached leaves its
- * own field showing ids rather than taking the other two down with it.
+ * own field showing ids rather than taking the others down with it. `/plant/list`
+ * is caught for the second reason as well — it is newer than the rest and a
+ * backend that predates it answers nothing at all.
  *
  * @returns {Promise<{categories: Map<string, string>,
- *   departments: Map<string, string>, grades: Map<string, string>}>}
+ *   departments: Map<string, string>, grades: Map<string, string>,
+ *   plants: Map<string, string>}>}
  */
 export async function getSnapshotLabels() {
-  const [cat, dept, grade] = await Promise.all([
+  const [cat, dept, grade, plant] = await Promise.all([
     api.get("/category/list").catch(() => null),
     api.get("/department/list").catch(() => null),
     api.get("/grade/list").catch(() => null),
+    api.get("/plant/list").catch(() => null),
   ]);
 
   return {
     categories: idNames(cat, (c) => c.categoryName),
     departments: idNames(dept, (d) => d.deptName),
     grades: idNames(grade, gradeLabel),
+    plants: idNames(plant, (p) => plantLabel({ code: p.plantCode, name: p.plantName })),
   };
 }

@@ -22,12 +22,7 @@ const SUBMIT_BTN =
 const CANCEL_BTN =
   "px-6 py-2 bg-[#f23a4c] text-white text-sm font-semibold rounded shadow hover:bg-[#d92e3f] transition-colors cursor-pointer disabled:opacity-60";
 
-export default function CourseFeedbackForm({
-  emoduleId,
-  empCode,
-  courseName,
-  questions,
-}) {
+export default function CourseFeedbackForm({ emoduleId, empCode, questions }) {
   const router = useRouter();
 
   const [answers, setAnswers] = useState({});
@@ -123,14 +118,12 @@ export default function CourseFeedbackForm({
   return (
     <div className="bg-white rounded shadow border border-gray-200 overflow-hidden text-[12px]">
       {/* Header — no BACK button here: the course layout already provides one
-          above, and CANCEL below returns to the course. */}
-      {/* Form and course on the one heading, as the assignment carries them.
-          They were two bars with a covering note under both, which spent three
-          rows on saying what the first row already said. */}
+          above, and CANCEL below returns to the course. The course name is not
+          repeated, as on the assignment: the page was reached from that course
+          and its own header names it. */}
       <div className="bg-[#3482AE] px-4 py-2">
         <h2 className="text-white font-bold tracking-wide uppercase">
           Training Feedback Form
-          {courseName ? ` : ${courseName}` : ""}
         </h2>
       </div>
 

@@ -149,7 +149,6 @@ export default function CourseFeedbackPage({ params }) {
     <CourseFeedbackForm
       emoduleId={emoduleId}
       empCode={empCode}
-      courseName={state.course.name}
       questions={state.questions}
     />
   );

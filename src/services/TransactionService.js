@@ -46,8 +46,13 @@ const FIELD_LABELS = {
   validTill: "Valid till",
   dept: "Departments",
   grade: "Grades",
+  plant: "Plants",
+  autoAssign: "Assign to joiners",
   status: "Status",
 };
+
+/** What a module's `auto_assign` column means to an officer. */
+const AUTO_ASSIGN_LABELS = { 0: "No", 1: "Yes" };
 
 /** What a module's `status` column means. Only these two are ever written. */
 const STATUS_LABELS = { 0: "Draft", 1: "Published" };
@@ -85,7 +90,7 @@ const namesOf = (value, labels) =>
  *
  * @param {string} field the snapshot key
  * @param {string} value the stored value
- * @param {{categories?: Map, departments?: Map, grades?: Map}} [labels]
+ * @param {{categories?: Map, departments?: Map, grades?: Map, plants?: Map}} [labels]
  */
 export function snapshotText(field, value, labels) {
   const text = clean(value);
@@ -98,6 +103,10 @@ export function snapshotText(field, value, labels) {
       return namesOf(text, labels?.departments);
     case "grade":
       return namesOf(text, labels?.grades);
+    case "plant":
+      return namesOf(text, labels?.plants);
+    case "autoAssign":
+      return AUTO_ASSIGN_LABELS[text] ?? text;
     case "status":
       return STATUS_LABELS[text] ?? text;
     case "validTill":

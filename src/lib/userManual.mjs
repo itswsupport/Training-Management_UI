@@ -516,8 +516,6 @@ export const CHAPTERS = [
             type: "bullets",
             items: [
               "If the training officer adds material to a course you have already completed, a yellow NEW CONTENT badge appears on the course header.",
-              "Your certificate still stands — the badge is only there so you know something has been added.",
-              "Open the sections to see what is new.",
             ],
           },
         ],

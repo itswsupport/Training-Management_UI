@@ -1207,7 +1207,7 @@ export default function CourseContentEditor({ course, ref }) {
 
         {sections.length === 0 ? (
           <p className="px-1 py-2 text-[12px] normal-case text-gray-500">
-            This course has no sections yet — use ADD SECTION above to start one.
+            This course has no sections yet.
           </p>
         ) : null}
       </div>

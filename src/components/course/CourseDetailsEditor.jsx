@@ -86,6 +86,16 @@ export default function CourseDetailsEditor({ course, options, ref }) {
   const [allotted, setAllotted] = useState([]);
 
   /**
+   * Whether this course keeps handing itself to employees who join the plant,
+   * department and grade it was aimed at.
+   *
+   * Not editable here — carried through as the course was stored, so a save
+   * from this form never silently turns the rule on or off. It is decided when
+   * the course is raised; see autoAssignParam in ModuleService.
+   */
+  const autoAssign = course.autoAssign === true;
+
+  /**
    * What the fields were filled with, so `save` can tell an untouched pair from
    * a deliberate one. Untouched must not narrow: the four filters are an AND,
    * so saving a course back with its existing hundred people ticked would mean
@@ -196,10 +206,23 @@ export default function CourseDetailsEditor({ course, options, ref }) {
         description: description.trim(),
         objectives: objectives.map((o) => o.trim()).filter(Boolean),
         // Sent only when the officer actually changed them; see `initial`.
-        plantIds: untouchedAudience ? [] : plantIds,
+        //
+        // Except when the course is being left open: the rule is re-run later
+        // against whatever plant is stored, so a course that keeps assigning
+        // has to have one recorded even on an untouched save. Sending it here
+        // cannot widen anything — these are the plants the course already
+        // reached, so as a filter they only rule out sites it never went to.
+        plantIds: autoAssign || !untouchedAudience ? plantIds : [],
         deptIds,
         gradeIds,
-        empCodes: untouchedAudience ? [] : empCodes,
+        // Left off entirely while the course is open, as well as when the
+        // officer has not touched the audience. A named list and a rule that
+        // keeps applying are contradictory — the backend refuses the pair and
+        // would drop the tick silently, so the tick is what wins here and the
+        // field says as much. Nothing is lost by it: allotment only ever adds,
+        // so a name deselected here was never coming off the course anyway.
+        empCodes: autoAssign || untouchedAudience ? [] : empCodes,
+        autoAssign,
         status: course.status,
         regBy: course.regBy,
         regDate: course.regDate,

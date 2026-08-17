@@ -129,6 +129,11 @@ export async function getCourseDetail(emoduleId) {
     regTime: clean(e.regTime),
     kraQuarter: clean(e.kraQuarter),
     validTill: clean(e.validTill),
+    // Whether the course still hands itself to employees who join the matching
+    // plant, department and grade. False on every course raised before the
+    // column existed — those carry no stored plant, so their rule cannot be
+    // re-run until an officer saves one back with the field ticked.
+    autoAssign: e.autoAssign === 1,
     objectives: (e.shortDescription ?? [])
       .map((s) => clean(s.emoduleShortDesc))
       .filter(Boolean),
@@ -192,6 +197,28 @@ function optionalAudience({ plantIds, empCodes }) {
 }
 
 /**
+ * Whether the course should keep handing itself to employees who join the
+ * matching plant, department and grade after it goes out.
+ *
+ * Sent as "1"/"0" rather than a boolean because these go over a form post,
+ * where `false` would arrive as the string "false" and read as truthy.
+ *
+ * Undefined means on: an officer who picks a plant, a department and a grade
+ * has described a rule, and a rule that stops applying the day it is saved is
+ * not what they asked for. Picking named employees is the case that is not a
+ * rule, and the backend forces this off there whatever is sent — the check is
+ * repeated here only so the form's own tick matches what will happen.
+ */
+function autoAssignParam({ autoAssign, empCodes, plantIds }) {
+  if (empCodes?.length) return "0";
+  // No plant recorded means the rule would re-run against every site for ever.
+  // The backend refuses that combination outright; sent as off here too so the
+  // form and the stored row never disagree about what was saved.
+  if (!plantIds?.length) return "0";
+  return autoAssign === false ? "0" : "1";
+}
+
+/**
  * Creates (or updates the single draft) e-module and returns its id.
  *
  * @param {object} input
@@ -207,6 +234,8 @@ function optionalAudience({ plantIds, empCodes }) {
  * @param {string[]} input.gradeIds
  * @param {string[]} [input.empCodes] narrows to these employees; empty = all of
  *   the ones the three filters above already matched
+ * @param {boolean} [input.autoAssign] keep giving the course to employees who
+ *   join the matching plant, department and grade later; defaults to true
  * @param {string} input.regBy employee code of the training officer
  * @returns {Promise<number>} the saved module id
  */
@@ -230,6 +259,7 @@ export async function saveModule(input) {
     "deptIdList[]": input.deptIds,
     "gradeIdList[]": input.gradeIds,
     ...optionalAudience(input),
+    autoAssign: autoAssignParam(input),
   };
   // Reusing the draft slot sends /emodule/save down its UPDATE path, which
   // rebuilds the stored row from these params alone — so the existing course
@@ -305,6 +335,10 @@ export async function updateModuleDetails(input) {
     // adds — an employee who already has the course is skipped, and nobody is
     // ever taken off — so narrowing here cannot withdraw a course in progress.
     ...optionalAudience(input),
+    // An edit is also where a course raised before auto-assignment existed opts
+    // in: those rows have no stored plant, so their rule cannot be re-run until
+    // a save records one, and this is that save.
+    autoAssign: autoAssignParam(input),
   };
 
   unwrap(await sendForm("/emodule/save", params));

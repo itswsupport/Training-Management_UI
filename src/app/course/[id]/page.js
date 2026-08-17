@@ -412,14 +412,6 @@ export default function CourseViewPage({ params }) {
           </div>
 
           <div className="flex-1 space-y-4 p-4">
-            {update ? (
-              <p className="rounded border border-[#ffc107]/50 bg-[#ffc107]/10 px-3 py-2.5 text-xs normal-case text-[#7a5c00]">
-                This course has been updated since you completed it — the
-                trainer added new material on {update.when}. Your certificate
-                still stands; open the sections below to see what is new.
-              </p>
-            ) : null}
-
             <div>
               <BlockHeading icon={<FileText className="h-3.5 w-3.5" />}>
                 Course description

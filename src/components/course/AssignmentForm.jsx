@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { alerts } from "@/lib/alerts";
 import { apiErrorMessage } from "@/config/api";
@@ -58,7 +58,6 @@ export default function AssignmentForm({
   emoduleId,
   sectionId,
   empCode,
-  courseName,
   examType = DEFAULT_EXAM_TYPE,
   questions,
   allQuestions,
@@ -99,6 +98,23 @@ export default function AssignmentForm({
   const [error, setError] = useState(null);
 
   const answered = Object.keys(answers).length;
+
+  /**
+   * A lapsed quarter is said once, in a dialog, rather than as a red band the
+   * learner reads past on the way to a form that will not take their answers.
+   *
+   * The ref is what keeps it to once: React runs mount effects twice in
+   * development, and `overdue` cannot change without a fresh page load.
+   */
+  const overdueTold = useRef(false);
+  useEffect(() => {
+    if (!overdue || overdueTold.current) return;
+    overdueTold.current = true;
+    alerts.warning(
+      "Its quarter has closed, so this assignment can be read but no longer answered or submitted.",
+      "Course overdue"
+    );
+  }, [overdue]);
 
   /**
    * Saves are chained rather than fired per click. `/submit_exam/save` creates
@@ -267,33 +283,22 @@ export default function AssignmentForm({
   return (
     <div className="bg-white rounded shadow border border-gray-200 overflow-hidden text-[12px]">
       {/* Header — no BACK button here: the course layout already provides one
-          above, and CANCEL below returns to the course. */}
-      {/* Paper and course on the one heading. They were two bars — the blue one
-          naming the paper, a tinted one under it repeating "Course Name :" —
-          which spent two rows of the form on six words before a single question
-          appeared. The lecture rode along on the second bar and has gone with
-          it: this is the section's paper, not one lecture's. */}
+          above, and CANCEL below returns to the course. The course name is not
+          repeated: the page was reached from that course and its own header
+          names it. */}
       <div className="bg-[#3482AE] px-4 py-2">
         <h2 className="text-white font-bold tracking-wide uppercase">
           {examTypeLabel(examType)}
-          {courseName ? ` : ${courseName}` : ""}
         </h2>
       </div>
 
-      {/* Overdue and preview say why, because a form that quietly refuses to
-          take a click reads as broken. A submitted paper says nothing: it is
-          the one case the learner already knows about — they sat it — and the
-          answers filled in below, with nothing clickable, show it plainly
-          enough without a paragraph over them. Overdue is checked first: a
-          lapsed quarter is the reason nothing can be sent, whatever else is
-          also true of the paper. */}
-      {overdue ? (
-        <p className="mx-2 rounded border border-[#dc3545] bg-[#dc3545]/10 px-3 py-2.5 text-[12px] normal-case text-[#c2384a]">
-          This course is overdue. Its quarter has closed, so the assignment can
-          be read but no longer answered or submitted. Please speak to your
-          training officer.
-        </p>
-      ) : readOnly ? (
+      {/* Preview says why, because a form that quietly refuses to take a click
+          reads as broken. A submitted paper says nothing: it is the one case
+          the learner already knows about — they sat it — and the answers filled
+          in below, with nothing clickable, show it plainly enough without a
+          paragraph over them. Overdue is not here at all — it opens as a dialog
+          instead, above. */}
+      {!overdue && readOnly ? (
         <p className="mx-2 rounded border border-[#ffc107] bg-[#ffc107]/10 px-3 py-2.5 text-[12px] normal-case text-[#a17200]">
           Preview only. This assignment is filled in by the employees the course
           is assigned to, so no answers can be saved or submitted here.

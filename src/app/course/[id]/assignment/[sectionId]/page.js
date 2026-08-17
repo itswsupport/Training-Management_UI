@@ -234,7 +234,6 @@ export default function AssignmentPage({ params }) {
       emoduleId={emoduleId}
       sectionId={sectionId}
       empCode={empCode}
-      courseName={state.course.name}
       examType={state.examType}
       questions={state.questions}
       allQuestions={state.allQuestions}

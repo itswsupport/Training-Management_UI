@@ -276,16 +276,12 @@ function AssignmentRow({
         </span>
         <span className="min-w-0 flex-1 text-[12px] normal-case text-gray-600">
           {count} question{count === 1 ? "" : "s"}
-          {/* Only the two states the learner cannot act on say anything. The
-              hints that used to follow — "complete this before you start the
-              lectures below", and its post-assignment twin — told a learner
-              looking at a row with a live button on it to do the thing the
-              button already offers. */}
-          {submitted
-            ? " — already submitted, so your answers can be read but no longer changed."
-            : locked
-              ? ` — ${lockedReason}`
-              : null}
+          {/* Only a locked paper says anything here. The hints that used to
+              follow — "complete this before you start the lectures below", its
+              post-assignment twin, and the note that a submitted paper can no
+              longer be changed — told a learner looking at a row with a live
+              button on it what that button already says. */}
+          {locked && !submitted ? ` — ${lockedReason}` : null}
         </span>
         {href ? (
           submitted ? (
@@ -849,11 +845,9 @@ export default function CourseContent({
                   <span className="min-w-0 flex-1 text-[12px] normal-case text-gray-600">
                     {section.lectures.length} lecture
                     {section.lectures.length === 1 ? "" : "s"}
-                    {preview
+                    {preview || lecturesLocked
                       ? ""
-                      : lecturesLocked
-                        ? " — submit the pre assignment above to unlock these."
-                        : ` — ${sectionWatched} of ${section.lectures.length} opened.`}
+                      : ` — ${sectionWatched} of ${section.lectures.length} opened.`}
                   </span>
                   {lecturesLocked ? (
                     <span className={PAPER_LOCKED_BTN} aria-disabled="true">
