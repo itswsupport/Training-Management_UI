@@ -115,20 +115,51 @@ export default function MultiSelect({
     );
   }, [options, query]);
 
+  /**
+   * How many rows are actually put in the DOM at once.
+   *
+   * A thousand-row list is a thousand checkboxes React has to build, lay out
+   * and then rebuild on every keystroke, which is the other half of why this
+   * field stalled on a full audience. The list scrolls 56px of rows at a time,
+   * so nobody was ever going to reach row 200 by dragging — they type. What is
+   * left out is said in the list rather than silently dropped, because a
+   * quietly shortened list of employees reads as "these are all of them".
+   */
+  const RENDER_LIMIT = 200;
+  const visible = filtered.length > RENDER_LIMIT ? filtered.slice(0, RENDER_LIMIT) : filtered;
+  const hidden = filtered.length - visible.length;
+
+  /**
+   * Membership as a Set rather than `selected.includes(...)` on an array.
+   *
+   * This field runs to the whole audience of a course — over a thousand
+   * employees once every plant, department and grade is ticked — and the checks
+   * below happen four times per render: twice deriving the badges, once for the
+   * "all" tick, and once more for every row on screen. Against an array each of
+   * those is a linear scan, so with everything selected the control was doing
+   * on the order of two million string comparisons per render, and paying it
+   * again on every keystroke in the search box. That is what made the field
+   * look like it was hanging rather than loading.
+   */
+  const selectedSet = useMemo(() => new Set(selected), [selected]);
+
   const toggle = (value) =>
     onChange(
-      selected.includes(value)
+      selectedSet.has(value)
         ? selected.filter((v) => v !== value)
         : [...selected, value]
     );
 
-  const selectedLabels = options
-    .filter((o) => selected.includes(o.value))
-    .map((o) => o.label);
+  // What was picked, in the order the list offers it. One pass, reused by the
+  // badges, the count and the "all" tick below.
+  const selectedOptions = useMemo(
+    () => options.filter((o) => selectedSet.has(o.value)),
+    [options, selectedSet]
+  );
 
   // Every option ticked. `> 0` matters: an empty list must not read as "all".
   const allSelected =
-    options.length > 0 && options.every((o) => selected.includes(o.value));
+    options.length > 0 && selectedOptions.length === options.length;
 
   /**
    * Ticks or clears the whole list — the FULL list, not the filtered view. A
@@ -140,9 +171,23 @@ export default function MultiSelect({
   // What was picked shows as badges in the field. Only the first few are drawn
   // so the control keeps one height however many are chosen — the rest are
   // counted, and the title carries the full list.
-  const selectedOptions = options.filter((o) => selected.includes(o.value));
   const shown = selectedOptions.slice(0, INLINE_LABELS);
   const extra = selectedOptions.length - INLINE_LABELS;
+
+  /**
+   * The hover text. Spelling out every pick is only useful while there are few
+   * enough to read — a thousand employees joined together is a 30KB string
+   * rebuilt on every render and a tooltip nobody can use, so past that it
+   * simply says how many.
+   */
+  const TITLE_LIMIT = 40;
+  const title = disabled
+    ? placeholder
+    : allSelected && allLabel
+      ? allLabel
+      : selectedOptions.length > TITLE_LIMIT
+        ? `${selectedOptions.length} selected`
+        : selectedOptions.map((o) => o.label).join(", ");
 
   /** Takes one value off the selection, without touching the rest. */
   const remove = (value) => onChange(selected.filter((v) => v !== value));
@@ -167,7 +212,7 @@ export default function MultiSelect({
             toggleOpen();
           }
         }}
-        title={disabled ? placeholder : selectedLabels.join(", ")}
+        title={title}
         className={`flex w-full items-center justify-between gap-2 rounded border px-2 py-1.5 text-left text-[12px] outline-none transition focus:border-[#3482AE] focus:ring-2 focus:ring-[#3482AE]/30 ${
           disabled
             ? "cursor-not-allowed border-gray-200 bg-gray-100"
@@ -259,7 +304,7 @@ export default function MultiSelect({
             {filtered.length === 0 ? (
               <p className="px-3 py-2 text-[12px] text-gray-500">No matches</p>
             ) : (
-              filtered.map((o) => (
+              visible.map((o) => (
                 <label
                   key={o.value}
                   // Whatever the row does not spell out, on hover. Rows that
@@ -271,13 +316,18 @@ export default function MultiSelect({
                   <input
                     type="checkbox"
                     className="accent-[#3482AE]"
-                    checked={selected.includes(o.value)}
+                    checked={selectedSet.has(o.value)}
                     onChange={() => toggle(o.value)}
                   />
                   {o.label}
                 </label>
               ))
             )}
+            {hidden > 0 ? (
+              <p className="border-t border-gray-100 px-3 py-2 text-[11px] normal-case text-gray-500">
+                {hidden} more not shown — type to narrow the list.
+              </p>
+            ) : null}
           </div>
         </div>
       ) : null}

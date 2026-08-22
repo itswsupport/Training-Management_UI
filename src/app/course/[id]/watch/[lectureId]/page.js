@@ -13,7 +13,7 @@ import { apiErrorMessage } from "@/config/api";
 import { useAuth } from "@/context/AuthContext";
 import { useCourseAccess } from "@/hooks/useCourseAccess";
 import { decodeId, encodeId } from "@/lib/courseId";
-import { getEmpCode, isTrainingOfficer } from "@/lib/permissions";
+import { getEmpCode } from "@/lib/permissions";
 import { isFileVideoUrl, youTubeId } from "@/lib/video";
 import { materialUrl } from "@/services/ModuleService";
 import { getCourseDetail } from "@/services/ModuleService";
@@ -68,12 +68,15 @@ export default function WatchLecturePage({ params }) {
 
   const { user, loading: authLoading } = useAuth();
   const empCode = getEmpCode(user);
-  // An officer is checking the material, not working through it, so nothing
-  // they play here is recorded — the same rule the course page applies.
-  const preview = isTrainingOfficer(user);
 
   // Guards the ids in the URL, which are otherwise anybody's to change.
   const access = useCourseAccess(emoduleId);
+
+  // An officer checking a module over is not working through it, so nothing
+  // played here is recorded — the same rule the course page applies, and read
+  // from the same place. An officer playing a lecture of a course allotted to
+  // them, opened from their own dashboard, is a learner, and it counts.
+  const preview = access.preview;
 
   const [state, setState] = useState({ status: "loading" });
 
@@ -242,7 +245,8 @@ export default function WatchLecturePage({ params }) {
 
       {preview ? (
         <p className="mx-2 mb-3 rounded border border-[#ffc107] bg-[#ffc107]/10 px-3 py-2.5 text-[12px] normal-case text-[#a17200]">
-          Preview only. Progress is not recorded for a training officer.
+          Preview only. Nothing played here is recorded against a module you are
+          checking over.
         </p>
       ) : (
         <p className="mx-2 mb-3 rounded border border-[#3482AE]/30 bg-[#eaf3f9] px-3 py-2.5 text-[12px] normal-case text-[#2f6685]">

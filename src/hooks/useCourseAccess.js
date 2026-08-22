@@ -5,7 +5,11 @@ import { useEffect, useRef, useState } from "react";
 
 import { useAuth } from "@/context/AuthContext";
 import { alerts } from "@/lib/alerts";
-import { hasCourseGrant } from "@/lib/courseGrant";
+import {
+  hasCourseGrant,
+  hasOfficerQuery,
+  isOfficerCourseView,
+} from "@/lib/courseGrant";
 import {
   getDefaultDashboardForUser,
   getEmpCode,
@@ -31,26 +35,37 @@ import { COURSE_STATUS, getAssignedCourse } from "@/services/UserCourseService";
  *      visit.
  *   2. For a learner, the course is one of their own. A grant is a browser-side
  *      record and could be forged in devtools; this keeps a forged one from
- *      reaching another employee's course. Officers are exempt, since every
- *      module is legitimately theirs to open.
+ *      reaching another employee's course. An officer managing a module is
+ *      exempt, since every module is legitimately theirs to open.
+ *
+ * Holding the officer authority is not on its own what makes a page read-only.
+ * Courses are allotted to training officers as well, and one they opened from
+ * their own USER dashboard is theirs to sit: it has a due quarter, it can fall
+ * overdue, and it can come back after a grade C, exactly as it would for anyone
+ * else. What separates the two is whether the course is allotted to them and
+ * which list they came in through — answered here as `preview`, which every
+ * course page reads from rather than deciding for itself, so the course page
+ * and the lecture and assignment pages under it cannot drift apart on it.
  *
  * Fails closed: while the answer is unknown the caller must not render the
  * course, and an error answers "no".
  *
  * @param {number} emoduleId the decoded module id, or NaN for a bad URL token
- * @returns {{checking: boolean, allowed: boolean, overdue: boolean,
- *   locked: boolean, unlocksOn: string, attemptsLeft: number}} `checking` stays
- *   true through the refusal, so a blocked page renders nothing behind the
- *   alert; `overdue` marks a course that may be read but not submitted to;
- *   `locked` marks one whose quarter has not started, which may not be opened
- *   at all yet, and `unlocksOn` is the day it does; `attemptsLeft` is the
- *   sittings remaining on a course handed back after a grade C.
+ * @returns {{checking: boolean, allowed: boolean, preview: boolean,
+ *   canManage: boolean, overdue: boolean, locked: boolean, unlocksOn: string,
+ *   attemptsLeft: number, retakes: number}} `checking` stays true through the
+ *   refusal, so a blocked page renders nothing behind the alert; `preview` says
+ *   the course is being looked at rather than sat and `canManage` that it may
+ *   also be edited; `overdue` marks a
+ *   course that may be read but not submitted to; `locked` marks one whose
+ *   quarter has not started, which may not be opened at all yet, and
+ *   `unlocksOn` is the day it does; `attemptsLeft` is the sittings remaining on
+ *   a course handed back after a grade C.
  */
 export function useCourseAccess(emoduleId) {
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
   const empCode = getEmpCode(user);
-  const officer = isTrainingOfficer(user);
 
   const known = Number.isFinite(emoduleId);
   // Read during render rather than into state: a grant lasts far longer than a
@@ -58,8 +73,24 @@ export function useCourseAccess(emoduleId) {
   // verdict for the previous course survive a client-side route change.
   const granted = known && hasCourseGrant(emoduleId);
 
-  const needsLookup =
-    !authLoading && granted && !officer && Boolean(empCode);
+  const officer = known && isTrainingOfficer(user);
+
+  /**
+   * Came in through the Training Officer Dashboard's ALL MODULES list, which
+   * links with ?from=officer — the one entry point that carries editing.
+   *
+   * The query string is read as well as the stored mode because the course
+   * page keeps ?from=officer in its address across a reload; the stored mode is
+   * what carries the same answer down to /watch and /assignment, whose links
+   * have no room to repeat it.
+   */
+  const canManage =
+    officer && (isOfficerCourseView(emoduleId) || hasOfficerQuery());
+
+  // Asked for the officer too, and not only the learner. It is what says
+  // whether the course in the URL is one of THEIR allotted courses, which is
+  // half of the answer to whether they are sitting it or checking it over.
+  const needsLookup = !authLoading && granted && Boolean(empCode);
 
   // Keyed by the course it answers for: a result left over from the previously
   // viewed course must never be read as a verdict on this one.
@@ -103,6 +134,12 @@ export function useCourseAccess(emoduleId) {
     };
   }, [needsLookup, empCode, emoduleId]);
 
+  // Answered for this course, rather than left over from the last one.
+  const answered = lookup.courseId === emoduleId;
+
+  /** This course is allotted to the signed-in employee, officer or not. */
+  const enrolled = answered && lookup.status !== null;
+
   let checking = false;
   let allowed = false;
 
@@ -111,23 +148,39 @@ export function useCourseAccess(emoduleId) {
   } else if (!granted) {
     // No grant means the address bar, not a link — refused for everyone.
     allowed = false;
-  } else if (officer) {
-    allowed = true;
   } else if (!empCode) {
     allowed = false;
-  } else if (lookup.courseId !== emoduleId) {
+  } else if (!answered) {
+    // Officers wait for the lookup as well. They are allowed either way, but
+    // until it lands nothing knows whether the page should be recording what
+    // they do on it, and rendering it as a learner's first would write ticks
+    // against a course they are only checking over.
     checking = true;
   } else {
-    allowed = lookup.status !== null;
+    // Every module is the officer's to open, whether or not it was ever
+    // allotted to them — that is what their ALL MODULES list and their COURSE
+    // STATUS screen both link into.
+    allowed = officer || enrolled;
   }
 
+  /**
+   * Looking at the course rather than sitting it: nothing is ticked off, no
+   * paper can be answered, and no progress is reported.
+   *
+   * True of an officer on a module that is not theirs to sit — someone else's
+   * course reached from COURSE STATUS, or any module from their own list — and
+   * true as well when they came in to manage one, even one allotted to them,
+   * because that entry is about the module and not about their own attempt at
+   * it. False for the officer who opened one of their own allotted courses
+   * from their USER dashboard: on that page they are a learner like any other.
+   */
+  const preview = officer && (canManage || !enrolled);
+
   // The quarter has lapsed: the course stays readable, but nothing may be
-  // submitted against it. Never true for an officer, who submits nothing here
-  // in any case — their pages are already read-only previews.
+  // submitted against it. Never true of a module open to be managed, which is
+  // not being submitted to in any case — that page is a read-only preview.
   const overdue =
-    !officer &&
-    lookup.courseId === emoduleId &&
-    lookup.status === COURSE_STATUS.OVERDUE;
+    !preview && answered && lookup.status === COURSE_STATUS.OVERDUE;
 
   /**
    * The course is raised for a quarter that has not started yet.
@@ -137,15 +190,13 @@ export function useCourseAccess(emoduleId) {
    * quarter opens, though, so until then it may not be entered at all — unlike
    * an overdue course, which stays readable.
    *
-   * Officers are exempt for the same reason they are exempt from `overdue`:
-   * their pages are read-only previews and they submit nothing here, so a
-   * course they raised for next quarter must still be theirs to check.
+   * A module open to be managed is exempt for the same reason it is exempt
+   * from `overdue`: that page is a read-only preview and nothing is submitted
+   * from it, so a course the officer raised for next quarter must still be
+   * theirs to check. The gate applies to them as normally as to anyone else on
+   * a course they opened from their own dashboard to sit.
    */
-  const locked =
-    !officer &&
-    lookup.courseId === emoduleId &&
-    lookup.status !== null &&
-    isQuarterUpcoming(lookup.kraQuarter);
+  const locked = !preview && enrolled && isQuarterUpcoming(lookup.kraQuarter);
 
   const refused = !checking && !allowed;
 
@@ -175,6 +226,19 @@ export function useCourseAccess(emoduleId) {
   return {
     checking: checking || refused,
     allowed,
+    /**
+     * The course is being looked at, not sat. Every read-only branch on the
+     * course pages keys on this, so that merely holding the officer authority
+     * is not enough to turn a learner's own course into a preview.
+     */
+    preview,
+    /**
+     * The officer may edit this module and read its history — reserved for the
+     * ALL MODULES list they came in through. Deliberately not the same flag as
+     * `preview`: an officer reading someone else's course from COURSE STATUS
+     * gets the read-only page without the editing that screen never offered.
+     */
+    canManage,
     overdue,
     locked,
     // "01-04-2026" — the day it opens, for the notice that says so.
@@ -182,11 +246,10 @@ export function useCourseAccess(emoduleId) {
     /**
      * Sittings left on a course handed back after a grade C — 0 once they have
      * all been used, and 0 as well on a course that never came back. `retakes`
-     * below is what tells those two apart. An officer previewing has no attempt
-     * of their own, so it is always 0 for them.
+     * below is what tells those two apart. A module open to be managed carries
+     * no attempt of anyone's, so it is always 0 there.
      */
-    attemptsLeft:
-      !officer && lookup.courseId === emoduleId ? lookup.attemptsLeft : 0,
+    attemptsLeft: !preview && answered ? lookup.attemptsLeft : 0,
     /**
      * How many times this course has been handed back — 0 on a first sitting.
      *
@@ -195,6 +258,6 @@ export function useCourseAccess(emoduleId) {
      * answered-question sets are keyed on it, so a returned course starts
      * from nothing rather than inheriting the last attempt's ticks.
      */
-    retakes: lookup.courseId === emoduleId ? lookup.retakes : 0,
+    retakes: answered ? lookup.retakes : 0,
   };
 }

@@ -29,7 +29,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useCourseAccess } from "@/hooks/useCourseAccess";
 import { alerts } from "@/lib/alerts";
 import { decodeId, encodeId } from "@/lib/courseId";
-import { getEmpCode, isTrainingOfficer } from "@/lib/permissions";
+import { getEmpCode } from "@/lib/permissions";
 import {
   getModuleFormOptions,
   isQuarterClosed,
@@ -58,26 +58,23 @@ export default function CourseViewPage({ params }) {
   const { user } = useAuth();
   const empCode = getEmpCode(user);
 
-  // Editing belongs to the Training Officer Dashboard's module list, which
-  // links here with ?from=officer. The same officer opening this course from
-  // their own learner dashboard gets the plain read-only page. Read from
-  // location rather than useSearchParams so this route needs no Suspense
-  // boundary — it only decides whether a button is shown.
-  const [fromOfficer, setFromOfficer] = useState(false);
-  useEffect(() => {
-    setFromOfficer(
-      new URLSearchParams(window.location.search).get("from") === "officer"
-    );
-  }, []);
-
-  // The officer's view of the course: their history panel hangs off this, and
-  // it stays available whatever the quarter has done — a closed quarter is a
-  // reason to stop changing the record, not to stop reading it.
-  const officerView = isTrainingOfficer(user) && fromOfficer;
-
   // Whether this course is this user's to open at all. Guards the id in the
   // URL, which is otherwise anybody's to change.
   const access = useCourseAccess(emoduleId);
+
+  /**
+   * The officer's view of the course: their history panel hangs off this, and
+   * it stays available whatever the quarter has done — a closed quarter is a
+   * reason to stop changing the record, not to stop reading it.
+   *
+   * Editing belongs to the Training Officer Dashboard's module list, which
+   * links here with ?from=officer. The same officer opening a course allotted
+   * to THEM, from their own USER dashboard, is a learner on this page and gets
+   * everything a learner gets: the lecture ticks, the papers, the grade. Which
+   * of the two it is comes from useCourseAccess, so this page and the lecture
+   * and assignment pages under it cannot drift apart on the answer.
+   */
+  const officerView = access.canManage;
 
   const [course, setCourse] = useState(null);
   const [feedbackDue, setFeedbackDue] = useState(false);
@@ -462,15 +459,16 @@ export default function CourseViewPage({ params }) {
           </span>
         </div>
         <div className="p-3">
-          {/* A training officer never sits a course — the assignment already
-              renders read-only for them, and the content ticks are the same
-              kind of record, so opening a lecture here must not count as one
-              being completed. */}
+          {/* A module being checked over is not a course being sat — the
+              assignment already renders read-only in that view, and the
+              content ticks are the same kind of record, so opening a lecture
+              there must not count as one being completed. On an officer's own
+              allotted course this is false, and everything counts. */}
           <CourseContent
             emoduleId={course.id}
             sections={course.sections}
             attempt={access.retakes}
-            preview={isTrainingOfficer(user)}
+            preview={access.preview}
             onPlay={setActiveVideo}
           />
         </div>

@@ -15,14 +15,15 @@ import { downloadCertificate } from "@/lib/certificate";
 import { encodeId } from "@/lib/courseId";
 import { quarterLabel } from "@/services/MasterDataService";
 
-const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || "/etms";
-
 /**
- * The certificate link carries only the course id; the certificate page reads
- * the name / course / date / grade from the signed-in employee's own completed
- * record, so the values can't be forged by editing the URL.
+ * The certificate opens inside the application — a Link, not a second browser
+ * tab, so the sidebar and header stay and the sheet is one screen of the app
+ * rather than a document dropped somewhere else.
+ *
+ * It carries only the course id: the certificate page reads the name / course /
+ * date / grade from the signed-in employee's own completed record, so the
+ * values cannot be forged by editing the URL.
  */
-const certHref = (row) => `${BASE_PATH}/certificate?id=${encodeId(row.id)}`;
 
 /**
  * The values printed on the sheet, taken from the row the employee's own
@@ -118,15 +119,14 @@ export default function CompletedCoursesGrid({
         enableSorting: false,
         Cell: ({ row }) => (
           <span className="flex items-center gap-3 text-[#3482AE]">
-            <a
-              href={certHref(row.original)}
-              target="_blank"
-              rel="noreferrer"
+            <Link
+              href={`/certificate?id=${encodeId(row.original.id)}`}
               title="View certificate"
+              aria-label="View certificate"
               className="hover:text-[#2a6a8f]"
             >
               <Eye className="w-4 h-4" />
-            </a>
+            </Link>
             <button
               type="button"
               onClick={() => handleDownload(row.original)}

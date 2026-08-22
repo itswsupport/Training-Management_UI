@@ -10,7 +10,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useCourseAccess } from "@/hooks/useCourseAccess";
 import { decodeId, encodeId } from "@/lib/courseId";
 import { grantCourseAccess } from "@/lib/courseGrant";
-import { getEmpCode, isTrainingOfficer } from "@/lib/permissions";
+import { getEmpCode } from "@/lib/permissions";
 import { DEFAULT_EXAM_TYPE, EXAM_TYPES } from "@/lib/examType";
 import {
   getAssignmentQuestions,
@@ -66,9 +66,10 @@ export default function AssignmentPage({ params }) {
   // Guards the ids in the URL, which are otherwise anybody's to change.
   const access = useCourseAccess(emoduleId);
 
-  // The assignment is the employee's to sit. A training officer opens it to
-  // check the paper, so they get the questions with no way to answer or submit.
-  const readOnly = isTrainingOfficer(user);
+  // The assignment is the employee's to sit. An officer checking a module over
+  // gets the questions with no way to answer or submit — but the same officer
+  // sitting a course allotted to them answers and submits it like anybody else.
+  const readOnly = access.preview;
 
   const [state, setState] = useState({ status: "loading" });
 

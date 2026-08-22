@@ -1,26 +1,17 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 
+import CertificateSheet from "@/components/certificate/CertificateSheet";
 import { apiErrorMessage } from "@/config/api";
 import { useAuth } from "@/context/AuthContext";
 import { alerts } from "@/lib/alerts";
 import { decodeId } from "@/lib/courseId";
-import {
-  CERT_ARTWORK,
-  CERT_ASPECT,
-  CERT_FIELDS,
-  CERT_INK,
-  downloadCertificate,
-} from "@/lib/certificate";
+import { downloadCertificate } from "@/lib/certificate";
 import { getDisplayName, getEmpCode } from "@/lib/permissions";
 import { getCompletedCourse } from "@/services/UserCourseService";
-
-// Positions, ink and artwork are shared with the PDF download so the sheet on
-// screen and the sheet in the file stay the same drawing.
 
 function Unavailable({ children }) {
   return (
@@ -32,14 +23,8 @@ function Unavailable({ children }) {
             Certificate Unavailable
           </h2>
         </div>
-        <div className="p-3 space-y-4 text-center">
+        <div className="p-3 text-center">
           <p className="normal-case text-gray-700">{children}</p>
-          <Link
-            href="/UserDashboard"
-            className="inline-block px-6 py-2 bg-[#3482AE] text-white text-sm font-semibold rounded shadow hover:bg-[#2a6a8f] transition-colors"
-          >
-            BACK TO MY DASHBOARD
-          </Link>
         </div>
       </div>
     </div>
@@ -47,6 +32,7 @@ function Unavailable({ children }) {
 }
 
 function CertificateBody() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const { user, loading: authLoading } = useAuth();
   const empCode = getEmpCode(user);
@@ -143,14 +129,11 @@ function CertificateBody() {
     }
   };
 
-  // The certificate opens in a tab of its own, so "cancel" closes it. A tab the
-  // employee opened themselves cannot be closed by script, so step back instead.
-  const handleCancel = () => {
-    window.close();
-    setTimeout(() => {
-      if (!window.closed) window.history.back();
-    }, 100);
-  };
+  // The certificate is a screen of the application now rather than a tab of its
+  // own, so "cancel" is simply the way back to the list that opened it. Stepping
+  // back rather than pushing the dashboard keeps the employee's filters and
+  // their page of the table, which a fresh navigation would reset.
+  const handleCancel = () => router.back();
 
   return (
     <div className="flex min-h-full flex-1 justify-center bg-gray-200 p-4 print:block print:bg-white print:p-0">
@@ -161,35 +144,10 @@ function CertificateBody() {
         {/* Only the sheet scrolls sideways on a narrow screen — the buttons
             below it stay centred in the viewport. */}
         <div className="overflow-x-auto print:overflow-visible">
-          <div
-            className="relative mx-auto block w-full min-w-[640px] shadow-lg print:min-w-0 print:shadow-none"
-            style={{ containerType: "inline-size", aspectRatio: CERT_ASPECT }}
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={CERT_ARTWORK}
-              alt="Certificate of Training"
-              className="absolute inset-0 h-full w-full"
-            />
-            {CERT_FIELDS.map((f) => (
-              <span
-                key={f.key}
-                className="absolute whitespace-nowrap"
-                style={{
-                  left: `${f.left}%`,
-                  top: `${f.top}%`,
-                  transform: "translate(-50%, -50%)",
-                  // `cqw` is a percentage of the sheet's own width — the same
-                  // thing the PDF works out against its page width.
-                  fontSize: `${f.size}cqw`,
-                  fontWeight: f.weight,
-                  color: CERT_INK,
-                }}
-              >
-                {values[f.key]}
-              </span>
-            ))}
-          </div>
+          <CertificateSheet
+            values={values}
+            className="min-w-[640px] shadow-lg print:min-w-0 print:shadow-none"
+          />
         </div>
 
         {/* Actions sit under the sheet and stay off the printed page. */}
@@ -202,12 +160,6 @@ function CertificateBody() {
           >
             {downloading ? "PREPARING…" : "DOWNLOAD"}
           </button>
-          <Link
-            href="/UserDashboard"
-            className="rounded bg-[#20c997] px-6 py-2 text-sm font-semibold text-white shadow transition-colors hover:bg-[#1aa87f]"
-          >
-            BACK TO MY DASHBOARD
-          </Link>
           <button
             type="button"
             onClick={handleCancel}

@@ -201,6 +201,11 @@ function SectionHeader({ title, headerColor = "#3482AE", action = null }) {
  */
 function validateSection(section) {
   if (!section.name.trim()) return "Please enter a section name.";
+  // A section with no lecture in it is a heading and nothing else: there is
+  // nothing for a learner to open, and any question written against it would
+  // have no lecture to belong to.
+  if (section.lectures.length === 0)
+    return "Please add at least one lecture to this section.";
   for (let i = 0; i < section.lectures.length; i += 1) {
     const l = section.lectures[i];
     if (!l.name.trim()) return `Lecture ${i + 1} needs a name.`;
@@ -933,15 +938,31 @@ export default function ModuleForm({
       alerts.warning(message, "Incomplete form");
     };
 
+    // Checked in the order the fields are read down the form, so the first
+    // thing the officer is told about is the first thing they missed.
     if (!name.trim()) return reject("Please enter the course name.");
+    if (!categoryId) return reject("Please select the course category.");
     if (!author.trim()) return reject("Please select the course instructor.");
     if (!description.trim()) return reject("Please enter the course description.");
     // Down the chain in order, so the officer is always sent to the field that
     // is actually open: with no plant chosen DEPARTMENT is greyed out, and
     // being told to select a department would point at a field they cannot use.
+    // Each link is asked for only where that master has rows — against a
+    // backend with no companies the chain starts at PLANT, and the officer is
+    // never sent back to a field that has nothing in it.
+    if (plantLocked) return reject("Please select at least one company.");
     if (deptLocked) return reject("Please select at least one plant.");
     if (deptIds.length === 0) return reject("Please select at least one department.");
     if (gradeIds.length === 0) return reject("Please select at least one grade.");
+    // Empty would be taken downstream as "everyone the filters above resolve
+    // to", which is a real audience but not one the officer has actually
+    // chosen — and it is one row in the dropdown ("All N employees") away, so
+    // asking for it costs a click and settles who the course reaches.
+    if (empCodes.length === 0) return reject("Please select at least one user.");
+    if (!financialYear) return reject("Please select the financial year.");
+    if (!selectedQuarter) return reject("Please select the applicable quarter.");
+    if (!objectives.some((o) => o.trim()))
+      return reject("Please enter at least one learning objective.");
     if (sections.length === 0)
       return reject("Please add at least one section before submitting.");
 

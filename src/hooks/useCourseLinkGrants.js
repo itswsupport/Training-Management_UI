@@ -5,8 +5,13 @@ import { useEffect } from "react";
 import { decodeId } from "@/lib/courseId";
 import { grantCourseAccess } from "@/lib/courseGrant";
 
-/** `/etms/course/<token>` or `/course/<token>`, with or without a sub-route. */
-const COURSE_HREF = /\/course\/([a-z]+)(?:[/?#]|$)/;
+/**
+ * `/etms/course/<token>` or `/course/<token>`, with or without a sub-route.
+ *
+ * The character after the token is captured too, because it says whether the
+ * link enters the course or moves around inside one already open — see below.
+ */
+const COURSE_HREF = /\/course\/([a-z]+)([/?#]|$)/;
 
 /**
  * Grants course access for every course link the user actually clicks.
@@ -26,11 +31,21 @@ export function useCourseLinkGrants() {
       if (!anchor) return;
 
       const href = anchor.getAttribute("href") || "";
-      const token = COURSE_HREF.exec(href)?.[1];
-      if (!token) return;
+      const match = COURSE_HREF.exec(href);
+      if (!match) return;
 
-      const emoduleId = decodeId(token);
-      if (Number.isFinite(emoduleId)) grantCourseAccess(emoduleId);
+      const emoduleId = decodeId(match[1]);
+      if (!Number.isFinite(emoduleId)) return;
+
+      // A link into the course decides which view it opens in; a link deeper
+      // inside it — a lecture, a paper — carries no ?from= and must leave that
+      // decision alone, or stepping into a lecture would drop an officer out of
+      // their own edit view.
+      const entering = match[2] !== "/";
+      grantCourseAccess(
+        emoduleId,
+        entering ? { officer: /[?&]from=officer(?:&|$)/.test(href) } : undefined
+      );
     };
 
     document.addEventListener("click", onClick, true);

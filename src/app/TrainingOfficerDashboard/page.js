@@ -13,6 +13,7 @@ import FeedbackFormPanel from "@/components/feedback/FeedbackFormPanel";
 import ModuleFormPanel from "@/components/modules/ModuleFormPanel";
 import { apiErrorMessage } from "@/config/api";
 import {
+  ANY_QUARTER,
   quarterFilterParams,
   useQuarterFilter,
 } from "@/hooks/useQuarterFilter";
@@ -101,6 +102,35 @@ export default function TrainingOfficerDashboard() {
     setCompanyId(next);
     setPlantId(ANY);
   };
+
+  /**
+   * Why the grid is empty, in the officer's own terms.
+   *
+   * Four things narrow this list at once - company, plant, financial year and
+   * quarter - and "No training modules found" names none of them, so an empty
+   * grid reads as a screen that failed to load rather than a filter that
+   * matched nothing. It is a real state: no course has ever been given to
+   * anyone at Rucha Yantra, and three of the active plants have never had one
+   * either, so picking any of them empties the grid correctly.
+   *
+   * Naming what is applied lets the officer see which control to widen without
+   * clearing all four to find out.
+   */
+  const narrowedBy = [
+    companies.find((c) => String(c.id) === String(companyId))?.name,
+    (() => {
+      const plant = plants.find((p) => String(p.id) === String(plantId));
+      return plant ? plantLabel(plant) : null;
+    })(),
+    filter.year ? `FY ${filter.year}` : null,
+    filter.quarter && filter.quarter !== ANY_QUARTER
+      ? `Q${filter.quarter}`
+      : null,
+  ].filter(Boolean);
+
+  const emptyMessage = narrowedBy.length
+    ? `No training modules for ${narrowedBy.join(" · ")}.`
+    : "No training modules found";
 
   const fetchModules = useCallback(async () => {
     try {
@@ -198,7 +228,7 @@ export default function TrainingOfficerDashboard() {
           manage
           title="ALL MODULES"
           headerColor="#ffc107"
-          emptyMessage="No training modules found"
+          emptyMessage={emptyMessage}
           companyNames={companyNames}
           plantNames={plantNames}
         />

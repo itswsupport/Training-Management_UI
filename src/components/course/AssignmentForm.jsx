@@ -292,19 +292,6 @@ export default function AssignmentForm({
         </h2>
       </div>
 
-      {/* Preview says why, because a form that quietly refuses to take a click
-          reads as broken. A submitted paper says nothing: it is the one case
-          the learner already knows about — they sat it — and the answers filled
-          in below, with nothing clickable, show it plainly enough without a
-          paragraph over them. Overdue is not here at all — it opens as a dialog
-          instead, above. */}
-      {!overdue && readOnly ? (
-        <p className="mx-2 rounded border border-[#ffc107] bg-[#ffc107]/10 px-3 py-2.5 text-[12px] normal-case text-[#a17200]">
-          Preview only. This assignment is filled in by the employees the course
-          is assigned to, so no answers can be saved or submitted here.
-        </p>
-      ) : null}
-
       <ol>
         {questions.map((question) => (
           <li key={question.id} className="border-t border-gray-200 px-4 py-3.5">

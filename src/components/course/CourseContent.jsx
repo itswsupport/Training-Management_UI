@@ -247,6 +247,8 @@ function AssignmentRow({
   preview,
   locked = false,
   lockedReason = "",
+  solo = false,
+  hideWhenEmpty = false,
 }) {
   const label = examTypeLabel(examType);
   const count = questions.length;
@@ -257,11 +259,17 @@ function AssignmentRow({
     : "border-b border-gray-200 bg-[#eaf3f9]/60";
 
   if (count === 0) {
+    // The other paper carries this section's assignment, so there is nothing to
+    // report here — saying "no post assignment has been set" beside it only
+    // raises a second paper the learner was never going to be given.
+    if (hideWhenEmpty) return null;
+
     return (
       <div className={`px-4 py-2.5 ${frame}`}>
         <p className="flex items-center gap-2 text-[12px] normal-case text-gray-400">
           <ClipboardList className="h-3.5 w-3.5 shrink-0" />
-          No {label.toLowerCase()} has been set for this section.
+          No {solo ? "assignment" : label.toLowerCase()} has been set for this
+          section.
         </p>
       </div>
     );
@@ -270,9 +278,13 @@ function AssignmentRow({
   return (
     <div className={`px-4 py-3 ${frame}`}>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        {/* The paper's name — only where the section HAS two of them. A name
+            exists to tell one paper from another, so over the only paper there
+            is it says nothing and implies a second one that never comes. The
+            icon stays either way, so the row still reads as an assignment. */}
         <span className="flex shrink-0 items-center gap-2 text-[12px] font-bold tracking-wide text-[#2f6685] uppercase">
           <ClipboardList className="h-4 w-4 shrink-0 text-[#3482AE]" />
-          {label}
+          {solo ? null : label}
         </span>
         <span className="min-w-0 flex-1 text-[12px] normal-case text-gray-600">
           {count} question{count === 1 ? "" : "s"}
@@ -772,6 +784,24 @@ export default function CourseContent({
         const postLocked =
           !preview && !lecturesDone && !paperDone(EXAM_TYPES.POST);
 
+        /*
+         * Does this section actually run two papers?
+         *
+         * The PRE / POST names only tell one paper from another, so they are
+         * worth showing only where there are two. On a section carrying a
+         * single assignment — which is every course written before the post
+         * paper existed, and any newer one the officer chose not to give a
+         * second — naming it "Pre assignment" implies a post paper is coming,
+         * and the empty row underneath announces one that never was. Both are
+         * dropped and the row is simply the assignment, with its button.
+         *
+         * Read off the questions rather than off the module's age: what makes
+         * the distinction meaningless is having one paper, not being old.
+         */
+        const hasPre = papers[EXAM_TYPES.PRE].length > 0;
+        const hasPost = papers[EXAM_TYPES.POST].length > 0;
+        const soloPaper = !(hasPre && hasPost);
+
         return (
           <div key={section.id || i} className="border-b border-gray-200 last:border-b-0">
             <button
@@ -829,6 +859,10 @@ export default function CourseContent({
                   submitted={paperDone(EXAM_TYPES.PRE)}
                   href={paperHref(EXAM_TYPES.PRE)}
                   preview={preview}
+                  solo={soloPaper}
+                  // The post paper holds this section's assignment, so this
+                  // row has nothing of its own to say.
+                  hideWhenEmpty={hasPost}
                 />
 
                 {/* The lectures, between the two papers. Given a band of its
@@ -1169,6 +1203,11 @@ export default function CourseContent({
                   submitted={paperDone(EXAM_TYPES.POST)}
                   href={paperHref(EXAM_TYPES.POST)}
                   preview={preview}
+                  solo={soloPaper}
+                  // With no post paper set, the pre row above is the whole of
+                  // this section's assignment; a "none set" line here would only
+                  // announce a second paper that was never written.
+                  hideWhenEmpty={!hasPost}
                   locked={postLocked}
                   lockedReason={`open all ${section.lectures.length} lecture${
                     section.lectures.length === 1 ? "" : "s"
