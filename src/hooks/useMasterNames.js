@@ -30,21 +30,31 @@ import {
  *   plantNames: Record<string, string>}}
  */
 export default function useMasterNames() {
-  const [companies, setCompanies] = useState([]);
-  const [plants, setPlants] = useState([]);
+  /* Both lists in ONE piece of state, settled together.
+   *
+   * They used to be two, set by two independent `.then`s, and every grid using
+   * this hook memoises its column definitions on the two maps below. So the two
+   * arrivals threw those definitions away and rebuilt them twice - and on Course
+   * Status that means the table recomputing accessors across 20,000 rows, twice,
+   * for the second and third time in a row. Settling both before either is
+   * published costs nothing and leaves exactly one rebuild.
+   *
+   * `Promise.all` would abandon both lists if either failed, so each is caught
+   * down to [] on its own: an unreachable /company/list must not also cost the
+   * PLANT column its names. */
+  const [{ companies, plants }, setMasters] = useState({
+    companies: [],
+    plants: [],
+  });
 
   useEffect(() => {
     let cancelled = false;
-    getCompanies()
-      .then((rows) => {
-        if (!cancelled) setCompanies(rows);
-      })
-      .catch(() => {});
-    getPlants({})
-      .then((rows) => {
-        if (!cancelled) setPlants(rows);
-      })
-      .catch(() => {});
+    Promise.all([
+      getCompanies().catch(() => []),
+      getPlants({}).catch(() => []),
+    ]).then(([companyRows, plantRows]) => {
+      if (!cancelled) setMasters({ companies: companyRows, plants: plantRows });
+    });
     return () => {
       cancelled = true;
     };

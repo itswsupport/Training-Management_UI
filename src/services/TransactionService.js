@@ -163,8 +163,17 @@ export function fieldChanges(changedFields, oldValue, newValue) {
   }));
 }
 
-/** The snapshot fields whose stored value is an id rather than a word. */
-const ID_FIELDS = new Set(["category", "dept", "grade"]);
+/**
+ * The snapshot fields whose stored value is an id rather than a word.
+ *
+ * `plant` belongs here as much as the other three and was missed when the plant
+ * field joined the snapshot. `snapshotText` has always known how to name a plant
+ * and `getSnapshotLabels` has always built the map, but nothing ever asked for
+ * it: an edit that touched ONLY the plant left this set unmatched, so the masters
+ * were never fetched and the change read "Plants: 6 → —" — the raw id out of the
+ * snapshot, which is the one form of it an officer has no way to recognise.
+ */
+const ID_FIELDS = new Set(["category", "dept", "grade", "plant"]);
 
 /**
  * Whether any of these rows changed a field held as ids — which is to say,

@@ -325,8 +325,59 @@ function toCompanies(res) {
  *
  * @returns {Promise<{id: number, name: string}[]>}
  */
+/**
+ * The two masters below are asked for far more often than they change.
+ *
+ * COMPANY and PLANT are the only two columns on the officer's grids that the
+ * report cannot name by itself — the rows carry `compId` / `plantId` and nothing
+ * else — so every screen showing one fetches both lists to translate the ids.
+ * Course Status was fetching each of them TWICE on every visit: once for its own
+ * filter dropdowns and once, through `useMasterNames`, for the column names. Four
+ * requests, none cached, all fired at the same moment as the 5.7 MB
+ * `/user_module1/by_status` payload they then had to queue behind — which is why
+ * those two columns sat on a dash while the rest of the row was already drawn.
+ *
+ * `inFlight` is the half that fixes THAT: two callers asking in the same tick
+ * share one request instead of racing. `cache` is what makes the second visit to
+ * a screen instant.
+ *
+ * Neither list is edited from this app - plants and companies come from the EMS
+ * employee master - so a stale read can only mean a site added elsewhere in the
+ * last few minutes, which no screen here is waiting on. Hence minutes rather than
+ * the seconds a report is cached for.
+ *
+ * Only successful results are cached. A failure has to be asked again, or a
+ * backend that was briefly down would leave every dropdown on the tab empty for
+ * as long as the tab is open.
+ */
+const MASTER_TTL_MS = 5 * 60_000;
+const masterCache = new Map();
+const masterInFlight = new Map();
+
+function cachedMaster(key, load) {
+  const hit = masterCache.get(key);
+  if (hit && Date.now() - hit.at < MASTER_TTL_MS) return Promise.resolve(hit.rows);
+
+  const pending = masterInFlight.get(key);
+  if (pending) return pending;
+
+  const request = load()
+    .then((rows) => {
+      masterCache.set(key, { rows, at: Date.now() });
+      return rows;
+    })
+    .finally(() => {
+      masterInFlight.delete(key);
+    });
+
+  masterInFlight.set(key, request);
+  return request;
+}
+
 export async function getCompanies() {
-  return toCompanies(await api.get("/company/list").catch(() => null));
+  return cachedMaster("companies", async () =>
+    toCompanies(await api.get("/company/list").catch(() => null))
+  );
 }
 
 /**
@@ -347,10 +398,20 @@ export async function getCompanies() {
  * @returns {Promise<{id: number, name: string, code: string}[]>}
  */
 export async function getPlants({ companyIds = [] } = {}) {
-  const params = new URLSearchParams();
-  companyIds.forEach((id) => params.append("companyIdList[]", id));
+  // Keyed by the companies asked for, because the answer differs per company —
+  // "every plant" and "the plants of company 2" are two different lists and one
+  // slot would serve either to the other. Sorted so the same set in a different
+  // order is still one cache entry.
+  const key = `plants:${[...companyIds].map(String).sort().join(",")}`;
 
-  return toPlants(await api.get("/plant/list", { params }));
+  return cachedMaster(key, async () => {
+    const params = new URLSearchParams();
+    companyIds.forEach((id) => params.append("companyIdList[]", id));
+
+    // Deliberately NOT caught here — see the note above this function. A throw
+    // reaches the caller, and nothing is written to the cache.
+    return toPlants(await api.get("/plant/list", { params }));
+  });
 }
 
 /**

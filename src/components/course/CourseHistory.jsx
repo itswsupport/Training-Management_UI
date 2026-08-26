@@ -100,10 +100,10 @@ export default function CourseHistory({ emoduleId }) {
           .catch(() => {});
       }
 
-      // Same bargain for the category, department and grade names: only worth
-      // fetching when an edit here actually touched one of those fields, and
-      // not worth holding the table behind. Until they land — or if they never
-      // do — those changes read as the ids the snapshot stored.
+      // Same bargain for the category, department, grade and plant names: only
+      // worth fetching when an edit here actually touched one of those fields,
+      // and not worth holding the table behind. Until they land — or if they
+      // never do — those changes read as the ids the snapshot stored.
       if (usesSnapshotLabels(history)) {
         getSnapshotLabels()
           .then(setLabels)
