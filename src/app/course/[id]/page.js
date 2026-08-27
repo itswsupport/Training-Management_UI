@@ -29,6 +29,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useCourseAccess } from "@/hooks/useCourseAccess";
 import { alerts } from "@/lib/alerts";
 import { decodeId, encodeId } from "@/lib/courseId";
+import { reviewEmpFromUrl } from "@/lib/courseReview";
 import { getEmpCode } from "@/lib/permissions";
 import {
   getModuleFormOptions,
@@ -75,6 +76,20 @@ export default function CourseViewPage({ params }) {
    * and assignment pages under it cannot drift apart on the answer.
    */
   const officerView = access.canManage;
+
+  /**
+   * Whose attempt this page is reading, when it is not the viewer's own.
+   *
+   * Set only for an officer who arrived from COURSE STATUS, whose rows are one
+   * employee's attempt at a module rather than the module itself. It is read
+   * after mount, not during render: the URL is a browser-only thing and reading
+   * it inline would have the server and the client disagree on every link built
+   * from it.
+   */
+  const [reviewEmpCode, setReviewEmpCode] = useState("");
+  useEffect(() => {
+    setReviewEmpCode(reviewEmpFromUrl());
+  }, []);
 
   const [course, setCourse] = useState(null);
   const [feedbackDue, setFeedbackDue] = useState(false);
@@ -469,6 +484,9 @@ export default function CourseViewPage({ params }) {
             sections={course.sections}
             attempt={access.retakes}
             preview={access.preview}
+            // Only ever honoured on a preview — the code in the URL says whose
+            // attempt to read back, never who the viewer is allowed to be.
+            reviewEmpCode={access.preview ? reviewEmpCode : ""}
             onPlay={setActiveVideo}
           />
         </div>

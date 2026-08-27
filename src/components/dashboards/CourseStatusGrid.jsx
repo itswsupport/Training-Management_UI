@@ -11,6 +11,7 @@ import ExoMaterialTable from "@/components/ui/common/ExoMaterialTable";
 import ExportActions from "@/components/ui/common/ExportActions";
 import FeedbackResponseDialog from "@/components/dashboards/FeedbackResponseDialog";
 import { encodeId } from "@/lib/courseId";
+import { withReviewEmp } from "@/lib/courseReview";
 import { getCourseStatusConfig } from "@/lib/statusConfig";
 
 /**
@@ -78,7 +79,17 @@ export default function CourseStatusGrid({
         header: "COURSE NO",
         Cell: ({ row }) =>
           row.original.moduleId ? (
-            <Link href={`/course/${encodeId(row.original.moduleId)}`}>
+            // The row is one employee's attempt, not just the module, and the
+            // course page cannot tell the two apart on its own — every route
+            // under it is the same one a learner opens for themselves. The
+            // employee code goes with the link so the papers open showing what
+            // THEY answered and how it was marked, rather than as blank forms.
+            <Link
+              href={withReviewEmp(
+                `/course/${encodeId(row.original.moduleId)}`,
+                row.original.empCode
+              )}
+            >
               <span className="bg-[#3482AE] text-white px-2 py-1 rounded text-xs font-semibold cursor-pointer">
                 {row.original.no || "N/A"}
               </span>

@@ -7,7 +7,8 @@ import { alerts } from "@/lib/alerts";
 import { apiErrorMessage } from "@/config/api";
 import { encodeId } from "@/lib/courseId";
 import { grantCourseAccess } from "@/lib/courseGrant";
-import { rememberScore, scoreLine } from "@/lib/assignmentScore";
+import { rememberScore, scoreLine, scorePercent } from "@/lib/assignmentScore";
+import { withReviewEmp } from "@/lib/courseReview";
 import { DEFAULT_EXAM_TYPE, examTypeLabel } from "@/lib/examType";
 import { saveAnswer, submitAssignment } from "@/services/AssignmentService";
 
@@ -53,6 +54,11 @@ function readAnswered(empCode, emoduleId, sectionId, examType, attempt) {
  *   already submitted, which is what a paper in that state opens with
  * @param {boolean} [overdue] the course's quarter has lapsed; the paper can be
  *   read but no longer answered or submitted
+ * @param {string} [reviewEmpCode] a training officer reading ONE employee's
+ *   attempt, reached from COURSE STATUS. Set only on a read-only preview, and
+ *   what turns the paper from a blank copy into a marked script
+ * @param {Object<string, string>} [answerKey] `{questionId: correct ordinal}`,
+ *   sent for a review and never otherwise — see AssignmentService
  */
 export default function AssignmentForm({
   emoduleId,
@@ -66,8 +72,22 @@ export default function AssignmentForm({
   savedAnswers = null,
   overdue = false,
   attempt = 0,
+  reviewEmpCode = "",
+  answerKey = null,
 }) {
   const router = useRouter();
+
+  /**
+   * An officer marking somebody else's paper rather than anyone sitting one.
+   *
+   * The answers shown are that employee's, every option the key marks is called
+   * out right or wrong, and the header carries the total. It is a stricter thing
+   * than `readOnly`: an officer opening a module from ALL MODULES is read-only
+   * too, but there is no attempt behind it to mark.
+   */
+  const review = Boolean(reviewEmpCode);
+  /** Only where the key actually came through — see the page's `answerKey`. */
+  const marking = review && Boolean(answerKey);
 
   // Falls back to the shown questions when the page did not narrow to a lecture.
   const sectionQuestions = allQuestions ?? questions;
@@ -88,7 +108,10 @@ export default function AssignmentForm({
    * sitting. `answeredBefore` below is what tracks that case.
    */
   const [answers, setAnswers] = useState(() =>
-    submitted && savedAnswers ? { ...savedAnswers } : {}
+    // A review shows what was given whether or not the paper was ever handed
+    // in: a half-answered attempt is exactly the thing an officer opens this
+    // to look at, and blanking it would report it as untouched.
+    (submitted || review) && savedAnswers ? { ...savedAnswers } : {}
   );
   const [answeredBefore, setAnsweredBefore] = useState(() =>
     readAnswered(empCode, emoduleId, sectionId, examType, attempt)
@@ -98,6 +121,29 @@ export default function AssignmentForm({
   const [error, setError] = useState(null);
 
   const answered = Object.keys(answers).length;
+
+  /**
+   * What the reviewed employee scored on this paper, or null when nobody is
+   * being reviewed.
+   *
+   * Counted here against the key rather than read from `/exam_marks`. That
+   * endpoint returns the same number, but it is a write dressed as a GET — it
+   * restamps the attempt's status and date on every call — so asking it would
+   * rewrite the record of when the paper was handed in every time an officer
+   * merely looked at it.
+   *
+   * Over the whole paper, not the questions on screen: the section is what is
+   * scored, and the marks column on COURSE STATUS totals the same thing, so a
+   * lecture-narrowed view must not quietly report a different denominator.
+   */
+  const score = marking
+    ? {
+        marks: sectionQuestions.filter(
+          (q) => answerKey[q.id] && answers[q.id] === answerKey[q.id]
+        ).length,
+        total: sectionQuestions.length,
+      }
+    : null;
 
   /**
    * A lapsed quarter is said once, in a dialog, rather than as a red band the
@@ -196,7 +242,9 @@ export default function AssignmentForm({
 
   const back = () => {
     grantCourseAccess(emoduleId);
-    router.push(`/course/${encodeId(emoduleId)}`);
+    // A review carries whose attempt it is back to the course, or the papers
+    // there would go back to reading the officer's own — which is nobody's.
+    router.push(withReviewEmp(`/course/${encodeId(emoduleId)}`, reviewEmpCode));
   };
 
   const handleSubmit = async () => {
@@ -286,10 +334,19 @@ export default function AssignmentForm({
           above, and CANCEL below returns to the course. The course name is not
           repeated: the page was reached from that course and its own header
           names it. */}
-      <div className="bg-[#3482AE] px-4 py-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 bg-[#3482AE] px-4 py-2">
         <h2 className="text-white font-bold tracking-wide uppercase">
           {examTypeLabel(examType)}
         </h2>
+        {/* The paper's total, on the right of the header. It is the one number
+            a marked script is read for, and the marks columns on COURSE STATUS
+            give it per course rather than per paper — so this is the only place
+            the two papers are scored apart. */}
+        {score ? (
+          <span className="shrink-0 rounded bg-white/15 px-2.5 py-1 text-[12px] font-bold tracking-wide text-white ring-1 ring-white/25">
+            Total marks {score.marks} / {score.total} ({scorePercent(score)}%)
+          </span>
+        ) : null}
       </div>
 
       <ol>
@@ -308,28 +365,54 @@ export default function AssignmentForm({
             <div className="grid grid-cols-1 gap-x-6 gap-y-2.5 md:grid-cols-2">
               {question.options.map((option) => {
                 const chosen = answers[question.id] === option.value;
+                /**
+                 * The three states a marked script has: the right option, the
+                 * wrong one that was picked, and everything else.
+                 *
+                 * `isKey` is drawn whether or not it was the one chosen — an
+                 * officer reading a wrong answer needs to see what the right
+                 * one was, which is the whole reason the key is fetched.
+                 */
+                const isKey =
+                  marking && String(answerKey[question.id] ?? "") === option.value;
+                const isWrong = marking && chosen && !isKey;
                 // On a paper already handed in, the answer given is called out
                 // rather than left to a greyed-out radio. A disabled radio is
                 // the one control a browser draws faintest, which is exactly
                 // backwards here: reading back what was answered is the whole
-                // reason the paper is on screen.
-                const marked = submitted && chosen;
+                // reason the paper is on screen. Stands down where the script
+                // is being marked — right and wrong say more than "yours", and
+                // three highlights on one row would say nothing at all.
+                const marked = !marking && submitted && chosen;
+
+                // Every highlighted row is boxed the same way, so right, wrong
+                // and "your answer" differ only in colour. w-fit so the box
+                // hugs the answer instead of stretching the width of the
+                // column, and negative margins that undo its own padding —
+                // without them a marked option's text would sit 8px right of
+                // the ones beside it and knock the row out of line.
+                const box = "w-fit -mx-2 -my-1 border px-2 py-1";
+                const rowCls = isKey
+                  ? `${box} border-[#20c997] bg-[#20c997]/10`
+                  : isWrong
+                    ? `${box} border-[#f23a4c] bg-[#f23a4c]/10`
+                    : marked
+                      ? `${box} border-[#3482AE] bg-[#eaf3f9]`
+                      : "";
+                const labelCls = isKey
+                  ? "font-bold text-[#158765]"
+                  : isWrong
+                    ? "font-bold text-[#c92a3a]"
+                    : marked
+                      ? "font-bold text-[#2a6a8f]"
+                      : "font-semibold text-[#3086b5]";
 
                 return (
                   <label
                     key={option.value}
                     className={`flex items-start gap-2 rounded text-[12px] leading-snug uppercase ${
                       inert ? "cursor-default" : "cursor-pointer"
-                    } ${
-                      // w-fit so the box hugs the answer instead of stretching
-                      // the width of the column, and negative margins that undo
-                      // its own padding — without them the marked option's text
-                      // would sit 8px right of the three beside it, and the
-                      // highlight would knock the row out of line.
-                      marked
-                        ? "w-fit -mx-2 -my-1 border border-[#3482AE] bg-[#eaf3f9] px-2 py-1"
-                        : ""
-                    }`}
+                    } ${rowCls}`}
                   >
                     <input
                       type="radio"
@@ -343,15 +426,7 @@ export default function AssignmentForm({
                     <span className="font-bold text-[#1f5f86]">
                       {OPTION_LETTERS[Number(option.value) - 1]})
                     </span>
-                    <span
-                      className={
-                        marked
-                          ? "font-bold text-[#2a6a8f]"
-                          : "font-semibold text-[#3086b5]"
-                      }
-                    >
-                      {option.label}
-                    </span>
+                    <span className={labelCls}>{option.label}</span>
                     {/* A dot rather than a worded badge: the row is already
                         bordered and filled, so this only has to confirm which
                         one it is. The title carries the words for anyone who
@@ -362,6 +437,22 @@ export default function AssignmentForm({
                         aria-label="Your answer"
                         className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[#3482AE]"
                       />
+                    ) : isKey || isWrong ? (
+                      // Worded rather than a dot, unlike the learner's own copy:
+                      // there are two marks to tell apart here, and a green and
+                      // a red dot on the same question is a legend the officer
+                      // would have to be taught.
+                      <span
+                        className={`ml-1 shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide whitespace-nowrap text-white ${
+                          isKey ? "bg-[#20c997]" : "bg-[#f23a4c]"
+                        }`}
+                      >
+                        {isKey
+                          ? chosen
+                            ? "Correct"
+                            : "Correct answer"
+                          : "Wrong answer"}
+                      </span>
                     ) : null}
                   </label>
                 );
@@ -370,7 +461,7 @@ export default function AssignmentForm({
             {/* A question left blank on a paper that was handed in. Said
                 plainly — an option row with nothing marked reads as a display
                 fault otherwise. */}
-            {submitted && !answers[question.id] ? (
+            {(submitted || review) && !answers[question.id] ? (
               <p className="mt-2 text-[11px] normal-case text-gray-500">
                 No answer was recorded for this question.
               </p>

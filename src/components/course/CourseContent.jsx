@@ -15,6 +15,7 @@ import {
 import MaterialViewer from "@/components/course/MaterialViewer";
 import { useAuth } from "@/context/AuthContext";
 import { encodeId } from "@/lib/courseId";
+import { withReviewEmp } from "@/lib/courseReview";
 import { getEmpCode } from "@/lib/permissions";
 import { EXAM_TYPES, EXAM_TYPE_LIST, examTypeLabel } from "@/lib/examType";
 import {
@@ -375,9 +376,22 @@ export default function CourseContent({
   preview = false,
   onPlay,
   attempt = 0,
+  reviewEmpCode = "",
 }) {
   const { user } = useAuth();
   const empCode = getEmpCode(user);
+
+  /**
+   * An officer reading ONE employee's attempt, arrived at from COURSE STATUS.
+   *
+   * Still a preview in every sense that matters — nothing here is ticked off,
+   * no gate applies and no paper can be answered — but the papers report that
+   * employee's answers instead of opening as blank forms, so the SUBMITTED
+   * badge and the review page below both speak about the right person.
+   */
+  const reviewing = preview && Boolean(reviewEmpCode);
+  /** Whose answers the rows below are about: the viewer's, or the reviewed. */
+  const answersEmpCode = reviewing ? reviewEmpCode : empCode;
 
   // Sections start with the first one open.
   const [openSections, setOpenSections] = useState(
@@ -466,14 +480,16 @@ export default function CourseContent({
    * ids, and a question id belongs to exactly one paper.
    */
   useEffect(() => {
-    if (preview || !empCode) return;
+    // A plain preview has no attempt to report on; a review has somebody
+    // else's, which is the one case an officer does read this.
+    if ((preview && !reviewing) || !answersEmpCode) return;
     let cancelled = false;
 
     Promise.all(
       sections
         .filter((s) => s.id && s.assignmentStatus === 1)
         .map((s) =>
-          getSubmittedAnswers(emoduleId, s.id, empCode)
+          getSubmittedAnswers(emoduleId, s.id, answersEmpCode)
             .then((answers) => [s.id, answers])
             // A failed lookup just leaves that section unknown; the assignment
             // page's own check catches it.
@@ -490,7 +506,7 @@ export default function CourseContent({
     return () => {
       cancelled = true;
     };
-  }, [sections, emoduleId, empCode, preview]);
+  }, [sections, emoduleId, answersEmpCode, preview, reviewing]);
 
   // The first section is open before anything is clicked, so its questions have
   // to be fetched here — waiting for a toggle left it with no assignment rows.
@@ -734,12 +750,17 @@ export default function CourseContent({
         const paperHref = (examType, lectureId = null) => {
           if (!section.id) return null;
           const base = `/course/${encodeId(emoduleId)}/assignment/${encodeId(section.id)}?type=${examType}`;
-          return lectureId ? `${base}&lectureId=${encodeId(lectureId)}` : base;
+          const href = lectureId ? `${base}&lectureId=${encodeId(lectureId)}` : base;
+          // Whose paper it is, where that is not the viewer's own — the page
+          // has no other way to know, and without it an officer reviewing an
+          // attempt lands on a blank form with nothing marked.
+          return withReviewEmp(href, reviewing ? reviewEmpCode : "");
         };
 
         /** Has this learner sat one paper of this section? */
         const paperDone = (examType) =>
-          !preview && isPaperSubmitted(papers[examType], answered);
+          (reviewing || !preview) &&
+          isPaperSubmitted(papers[examType], answered);
 
         /**
          * The section runs in one order, and each step waits for the one before

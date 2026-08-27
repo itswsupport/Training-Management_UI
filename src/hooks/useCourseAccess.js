@@ -10,6 +10,7 @@ import {
   hasOfficerQuery,
   isOfficerCourseView,
 } from "@/lib/courseGrant";
+import { reviewEmpFromUrl } from "@/lib/courseReview";
 import {
   getDefaultDashboardForUser,
   getEmpCode,
@@ -87,6 +88,39 @@ export function useCourseAccess(emoduleId) {
   const canManage =
     officer && (isOfficerCourseView(emoduleId) || hasOfficerQuery());
 
+  /**
+   * Whose attempt the address names, or "" when it names nobody.
+   *
+   * COURSE STATUS lists one row per employee per course, so its links carry
+   * `?emp=` — see lib/courseReview. Read after mount rather than during render:
+   * the address is a browser-only thing, and reading it inline would have the
+   * server's HTML and the client's first render disagree. Null until it has
+   * been read, which is not the same as "nobody" and is what `checking` below
+   * waits on.
+   */
+  const [urlEmp, setUrlEmp] = useState(null);
+  useEffect(() => {
+    setUrlEmp(reviewEmpFromUrl());
+  }, [emoduleId]);
+
+  /**
+   * An officer reading somebody else's attempt.
+   *
+   * This is the one entry that says so, because COURSE STATUS is the only
+   * screen whose rows are an ATTEMPT rather than a module, and its links carry
+   * no ?from=officer — so `canManage` cannot stand in for it.
+   *
+   * Compared against the viewer's own code, not merely tested for presence: a
+   * link that happens to name the viewer is their own course, and reading it as
+   * a review would take away the page they are entitled to sit.
+   *
+   * A code in the URL is still not authority — it only ever selects which
+   * answers are read back, and only for someone who already holds the officer
+   * authority.
+   */
+  const reviewing =
+    officer && Boolean(urlEmp) && urlEmp !== String(empCode ?? "").trim();
+
   // Asked for the officer too, and not only the learner. It is what says
   // whether the course in the URL is one of THEIR allotted courses, which is
   // half of the answer to whether they are sitting it or checking it over.
@@ -150,11 +184,15 @@ export function useCourseAccess(emoduleId) {
     allowed = false;
   } else if (!empCode) {
     allowed = false;
-  } else if (!answered) {
+  } else if (!answered || (officer && urlEmp === null)) {
     // Officers wait for the lookup as well. They are allowed either way, but
     // until it lands nothing knows whether the page should be recording what
     // they do on it, and rendering it as a learner's first would write ticks
     // against a course they are only checking over.
+    //
+    // They wait on the address too, for the same reason: until it is known
+    // whether it names another employee, a review of somebody's attempt would
+    // paint once as the officer's own sitting of the module.
     checking = true;
   } else {
     // Every module is the officer's to open, whether or not it was ever
@@ -173,8 +211,17 @@ export function useCourseAccess(emoduleId) {
    * because that entry is about the module and not about their own attempt at
    * it. False for the officer who opened one of their own allotted courses
    * from their USER dashboard: on that page they are a learner like any other.
+   *
+   * `reviewing` is the third reason, and it is not covered by the other two:
+   * a module allotted to the officer as well as to the employee they came to
+   * check made `enrolled` true, and COURSE STATUS carries no ?from=officer to
+   * make `canManage` true, so the page rendered as the officer's OWN attempt at
+   * that module — their answers instead of the employee's, the lecture gates
+   * switched on against per-browser ticks they had never earned, and a live
+   * "Start assignment" where a finished paper should have been. Which module is
+   * also theirs has no bearing on whose attempt they came to read.
    */
-  const preview = officer && (canManage || !enrolled);
+  const preview = officer && (canManage || !enrolled || reviewing);
 
   // The quarter has lapsed: the course stays readable, but nothing may be
   // submitted against it. Never true of a module open to be managed, which is

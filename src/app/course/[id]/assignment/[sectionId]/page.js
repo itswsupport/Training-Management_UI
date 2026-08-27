@@ -10,6 +10,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useCourseAccess } from "@/hooks/useCourseAccess";
 import { decodeId, encodeId } from "@/lib/courseId";
 import { grantCourseAccess } from "@/lib/courseGrant";
+import { reviewEmpFromUrl } from "@/lib/courseReview";
 import { getEmpCode } from "@/lib/permissions";
 import { DEFAULT_EXAM_TYPE, EXAM_TYPES } from "@/lib/examType";
 import {
@@ -143,9 +144,26 @@ export default function AssignmentPage({ params }) {
         // saved as — without that the post paper opened as the pre one.
         const examType = paperFromUrl();
 
+        /**
+         * Whose paper this is, when it is not the viewer's own.
+         *
+         * COURSE STATUS links a row — one employee's attempt — down to here, so
+         * an officer following it is reviewing that employee rather than
+         * looking at a blank copy of the module's paper. Gated on `readOnly`,
+         * which is the officer's preview of a course that is not theirs to sit:
+         * a learner adding ?emp= to their own URL is not in preview and the
+         * parameter does nothing for them.
+         */
+        const reviewEmpCode = readOnly ? reviewEmpFromUrl() : "";
+        const reviewing = Boolean(reviewEmpCode);
+
         const [answered, questions] = await Promise.all([
-          getSubmittedAnswers(emoduleId, sectionId, empCode),
-          getAssignmentQuestions(emoduleId, sectionId, examType),
+          getSubmittedAnswers(emoduleId, sectionId, reviewEmpCode || empCode),
+          // The answer key comes through for a review and for nothing else —
+          // marking somebody's finished paper is the one case that needs it.
+          getAssignmentQuestions(emoduleId, sectionId, examType, {
+            withAnswerKey: reviewing,
+          }),
         ]);
         if (cancelled) return;
 
@@ -174,6 +192,21 @@ export default function AssignmentPage({ params }) {
             questions: shown,
             allQuestions: questions,
             submitted,
+            reviewEmpCode,
+            /**
+             * questionId → the correct option's ordinal, as a string, so it
+             * compares directly with what the employee picked. Null outside a
+             * review, which is what keeps the marking off a learner's own copy
+             * of the paper. Questions saved without a key are left out and are
+             * simply never marked either way.
+             */
+            answerKey: reviewing
+              ? Object.fromEntries(
+                  questions
+                    .filter((q) => q.answer)
+                    .map((q) => [q.id, String(q.answer)])
+                )
+              : null,
             // What this learner picked, so a paper already sat comes back with
             // its own answers marked rather than as a blank form. Only the
             // answer travels — nothing here says which option was correct.
@@ -241,6 +274,8 @@ export default function AssignmentPage({ params }) {
       readOnly={readOnly}
       submitted={state.submitted}
       savedAnswers={state.savedAnswers}
+      reviewEmpCode={state.reviewEmpCode}
+      answerKey={state.answerKey}
       overdue={access.overdue}
       attempt={access.retakes}
     />

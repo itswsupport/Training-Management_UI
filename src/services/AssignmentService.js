@@ -20,14 +20,22 @@ import { clean, nowStamp } from "@/utils/etmsFormat";
  * enters component state or the rendered page. It is still present on the wire;
  * hiding it properly requires a backend projection.
  *
+ * `withAnswerKey` is the one exception, and it is deliberately opt-in per call
+ * rather than a property of the endpoint: a training officer reviewing somebody
+ * else's finished attempt needs the key to mark it, and that page is the only
+ * caller that passes it. Every learner-facing call leaves it off and gets the
+ * same stripped question it always did.
+ *
  * @param {number|string} emoduleId
  * @param {number|string} sectionId
  * @param {string} [examType] which paper — "PRE" or "POST"
+ * @param {{withAnswerKey?: boolean}} [options]
  */
 export async function getAssignmentQuestions(
   emoduleId,
   sectionId,
-  examType = DEFAULT_EXAM_TYPE
+  examType = DEFAULT_EXAM_TYPE,
+  { withAnswerKey = false } = {}
 ) {
   const list =
     unwrap(
@@ -47,6 +55,11 @@ export async function getAssignmentQuestions(
       // Null on questions written before assignments were lecture-wise — those
       // belong to the section as a whole.
       lectureId: q.lectureId ?? null,
+      // The correct option's 1-based ordinal — the same shape as an option's
+      // `value` below, so the two compare directly. 0 on a question saved
+      // without a key, which can then mark nothing right. Absent entirely
+      // unless the caller asked for it.
+      ...(withAnswerKey ? { answer: Number(q.quaAnswer) || 0 } : {}),
       text: clean(q.quaName),
       options: [q.optionsOne, q.optionsTwo, q.optionsThree, q.optionsFour]
         // A blank option is skipped, so ordinals can have gaps — keep the
