@@ -78,6 +78,17 @@ export default function WatchLecturePage({ params }) {
   // them, opened from their own dashboard, is a learner, and it counts.
   const preview = access.preview;
 
+  /**
+   * Nothing played here is recorded, and the player holds nothing back.
+   *
+   * The officer's preview is one half of it. The other is an overdue course:
+   * its quarter has closed, so no paper can be submitted and no tick can unlock
+   * anything any more — the gates on the course page come off with the quarter.
+   * Holding a learner to "play 90% of it, no skipping" for a record that can no
+   * longer be spent is a lock over nothing, on material that is theirs to read.
+   */
+  const untracked = preview || access.overdue;
+
   const [state, setState] = useState({ status: "loading" });
 
   useEffect(() => {
@@ -167,14 +178,14 @@ export default function WatchLecturePage({ params }) {
   // Stable for the life of the page, so noting it inside the player's effect
   // cannot rebuild the player and drop the seconds already watched.
   const onWatched = useCallback(() => {
-    if (preview || !ready) return;
+    if (untracked || !ready) return;
     markWatched(empCode, emoduleId, state.sectionId, lectureId, kind);
-  }, [preview, ready, empCode, emoduleId, state.sectionId, lectureId, kind]);
+  }, [untracked, ready, empCode, emoduleId, state.sectionId, lectureId, kind]);
 
   // What the heartbeats are reported against. Null for an officer, who records
   // nothing, and until the lecture is known.
   const material =
-    ready && !preview
+    ready && !untracked
       ? { empCode, emoduleId, sectionId: state.sectionId, lectureId, kind }
       : null;
 
@@ -229,7 +240,7 @@ export default function WatchLecturePage({ params }) {
           <TrackedVideo
             key={state.url}
             src={state.url}
-            onWatched={preview ? undefined : onWatched}
+            onWatched={untracked ? undefined : onWatched}
             material={material}
           />
         ) : videoId ? (
@@ -237,7 +248,7 @@ export default function WatchLecturePage({ params }) {
             key={videoId}
             videoId={videoId}
             title={state.lectureName}
-            onWatched={preview ? undefined : onWatched}
+            onWatched={untracked ? undefined : onWatched}
             material={material}
           />
         ) : null}
@@ -248,7 +259,7 @@ export default function WatchLecturePage({ params }) {
           Preview only. Nothing played here is recorded against a module you are
           checking over.
         </p>
-      ) : (
+      ) : untracked ? null : (
         <p className="mx-2 mb-3 rounded border border-[#3482AE]/30 bg-[#eaf3f9] px-3 py-2.5 text-[12px] normal-case text-[#2f6685]">
           About {Math.round(0.9 * 100)}% of this video has to be played before it
           counts. Time is only counted while it is actually playing, and playback

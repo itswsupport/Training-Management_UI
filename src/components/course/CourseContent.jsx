@@ -366,6 +366,11 @@ const materialTickCls =
  *   than working through it. Nothing they open is ticked off, because these
  *   ticks are a learner's progress record — the same reason the assignment
  *   itself renders read-only for them.
+ * @param {boolean} overdue the course's quarter has lapsed. It stays readable
+ *   — that is the whole of what an overdue course is — but nothing can be
+ *   submitted against it, so the gates below are lifted: a learner who never
+ *   sat the pre paper would otherwise find the material it was meant to
+ *   introduce shut for good, with no way left to open it.
  * @param {(video: {url: string, lecture: string, uploaded: boolean}) => void}
  *   [onPlay] hands a picked lecture to the preview card beside the course
  *   header, which plays it. Without it every video opens in a new tab.
@@ -374,6 +379,7 @@ export default function CourseContent({
   emoduleId,
   sections = [],
   preview = false,
+  overdue = false,
   onPlay,
   attempt = 0,
   reviewEmpCode = "",
@@ -392,6 +398,18 @@ export default function CourseContent({
   const reviewing = preview && Boolean(reviewEmpCode);
   /** Whose answers the rows below are about: the viewer's, or the reviewed. */
   const answersEmpCode = reviewing ? reviewEmpCode : empCode;
+
+  /**
+   * Nothing here is gated, and every paper reads rather than opens.
+   *
+   * Two cases, for one reason: neither viewer can submit anything. An officer
+   * is looking rather than working through it, and an overdue course's quarter
+   * has closed — the assignment page already renders inert for both. A gate
+   * exists to hold a step until the one before it is done, so where no step can
+   * be done any more it holds nothing back and only shuts the material away
+   * from someone who is entitled to read it.
+   */
+  const ungated = preview || overdue;
 
   // Sections start with the first one open.
   const [openSections, setOpenSections] = useState(
@@ -582,7 +600,7 @@ export default function CourseContent({
       // left without an id — those cannot be reported, and are left out here.
       sectionId: where?.sectionId,
       lectureId: where?.lectureId,
-      onRead: preview
+      onRead: ungated
         ? null
         : () => markWatched(materialKey(key, material.id)),
     });
@@ -610,14 +628,18 @@ export default function CourseContent({
       url: material.href,
       lecture: lectureName,
       uploaded: material.kind === "video",
-      onWatched: tracked
-        ? () => markWatched(materialKey(key, material.id))
-        : null,
+      // Only where a tick is still worth something. An overdue course's is not:
+      // nothing it could unlock is gated any more, and a card that refuses to
+      // be skipped through is a lock over a record that can never be spent.
+      onWatched:
+        tracked && !ungated
+          ? () => markWatched(materialKey(key, material.id))
+          : null,
       // Only a video the card can actually measure has anything to report, and
       // only for a learner — an officer previewing the content records nothing.
       // A link that opens in a tab is unreachable from here either way.
       material:
-        tracked && !preview && where?.lectureId
+        tracked && !ungated && where?.lectureId
           ? {
               empCode,
               emoduleId,
@@ -651,8 +673,9 @@ export default function CourseContent({
 
   const markWatched = (key) =>
     setWatched((prev) => {
-      // Opening something as an officer is not a learner completing it.
-      if (preview || prev.has(key)) return prev;
+      // Opening something as an officer is not a learner completing it, and an
+      // overdue course has nothing left to complete.
+      if (ungated || prev.has(key)) return prev;
       const next = new Set(prev);
       next.add(key);
       return next;
@@ -782,7 +805,7 @@ export default function CourseContent({
          * lectures for good.
          */
         const lecturesLocked =
-          !preview &&
+          !ungated &&
           papers[EXAM_TYPES.PRE].length > 0 &&
           !paperDone(EXAM_TYPES.PRE);
 
@@ -803,7 +826,7 @@ export default function CourseContent({
          * applied to a paper already handed in, which stays readable.
          */
         const postLocked =
-          !preview && !lecturesDone && !paperDone(EXAM_TYPES.POST);
+          !ungated && !lecturesDone && !paperDone(EXAM_TYPES.POST);
 
         /*
          * Does this section actually run two papers?
@@ -879,7 +902,7 @@ export default function CourseContent({
                   questions={papers[EXAM_TYPES.PRE]}
                   submitted={paperDone(EXAM_TYPES.PRE)}
                   href={paperHref(EXAM_TYPES.PRE)}
-                  preview={preview}
+                  preview={ungated}
                   solo={soloPaper}
                   // The post paper holds this section's assignment, so this
                   // row has nothing of its own to say.
@@ -900,7 +923,7 @@ export default function CourseContent({
                   <span className="min-w-0 flex-1 text-[12px] normal-case text-gray-600">
                     {section.lectures.length} lecture
                     {section.lectures.length === 1 ? "" : "s"}
-                    {preview || lecturesLocked
+                    {ungated || lecturesLocked
                       ? ""
                       : ` — ${sectionWatched} of ${section.lectures.length} opened.`}
                   </span>
@@ -1223,7 +1246,7 @@ export default function CourseContent({
                   questions={papers[EXAM_TYPES.POST]}
                   submitted={paperDone(EXAM_TYPES.POST)}
                   href={paperHref(EXAM_TYPES.POST)}
-                  preview={preview}
+                  preview={ungated}
                   solo={soloPaper}
                   // With no post paper set, the pre row above is the whole of
                   // this section's assignment; a "none set" line here would only

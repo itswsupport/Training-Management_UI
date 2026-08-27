@@ -484,6 +484,10 @@ export default function CourseViewPage({ params }) {
             sections={course.sections}
             attempt={access.retakes}
             preview={access.preview}
+            // The quarter has closed: the course stays readable, but its gates
+            // come off with it — nothing can be submitted, so a step waiting on
+            // the one before it would only shut the material away for good.
+            overdue={access.overdue}
             // Only ever honoured on a preview — the code in the URL says whose
             // attempt to read back, never who the viewer is allowed to be.
             reviewEmpCode={access.preview ? reviewEmpCode : ""}
