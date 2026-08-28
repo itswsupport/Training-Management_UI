@@ -11,31 +11,9 @@ import ExoMaterialTable from "@/components/ui/common/ExoMaterialTable";
 import ExportActions from "@/components/ui/common/ExportActions";
 import { audienceColumns, audienceFull } from "@/lib/audienceColumns";
 import { alerts } from "@/lib/alerts";
-import { downloadCertificate } from "@/lib/certificate";
+import { certValues, downloadCertificate } from "@/lib/certificate";
 import { encodeId } from "@/lib/courseId";
 import { quarterLabel } from "@/services/MasterDataService";
-
-/**
- * The certificate opens inside the application — a Link, not a second browser
- * tab, so the sidebar and header stay and the sheet is one screen of the app
- * rather than a document dropped somewhere else.
- *
- * It carries only the course id: the certificate page reads the name / course /
- * date / grade from the signed-in employee's own completed record, so the
- * values cannot be forged by editing the URL.
- */
-
-/**
- * The values printed on the sheet, taken from the row the employee's own
- * completed list returned — the same record the certificate page reads, so a
- * downloaded certificate and a viewed one say the same thing.
- */
-const certValues = (row) => ({
-  name: (row.empName || "").toUpperCase(),
-  course: (row.name || "").toUpperCase(),
-  date: row.regDate,
-  grade: (row.grade === "-" ? "" : row.grade || "").toUpperCase(),
-});
 
 export default function CompletedCoursesGrid({
   data = [],
@@ -119,6 +97,15 @@ export default function CompletedCoursesGrid({
         enableSorting: false,
         Cell: ({ row }) => (
           <span className="flex items-center gap-3 text-[#3482AE]">
+            {/* The certificate opens inside the application — a Link, not a
+                second browser tab, so the sidebar and header stay and the sheet
+                is one screen of the app rather than a document dropped
+                somewhere else.
+
+                It carries only the course id: the certificate page reads the
+                name / course / date / grade from the signed-in employee's own
+                completed record, so the values cannot be forged by editing the
+                URL. */}
             <Link
               href={`/certificate?id=${encodeId(row.original.id)}`}
               title="View certificate"

@@ -9,8 +9,8 @@ import { apiErrorMessage } from "@/config/api";
 import { useAuth } from "@/context/AuthContext";
 import { alerts } from "@/lib/alerts";
 import { decodeId } from "@/lib/courseId";
-import { downloadCertificate } from "@/lib/certificate";
-import { getDisplayName, getEmpCode } from "@/lib/permissions";
+import { certValues, downloadCertificate } from "@/lib/certificate";
+import { getEmpCode } from "@/lib/permissions";
 import { getCompletedCourse } from "@/services/UserCourseService";
 
 function Unavailable({ children }) {
@@ -108,13 +108,9 @@ function CertificateBody() {
     );
   }
 
-  const { course } = state;
-  const values = {
-    name: (getDisplayName(user) || course.empName).toUpperCase(),
-    course: course.name.toUpperCase(),
-    date: course.regDate,
-    grade: (course.grade || "").toUpperCase(),
-  };
+  // Built by the same function the download uses, off the same record — the
+  // sheet on screen and the PDF it writes cannot say different things.
+  const values = certValues(state.course);
 
   const handleDownload = async () => {
     setDownloading(true);
