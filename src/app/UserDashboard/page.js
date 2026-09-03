@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
@@ -92,8 +92,15 @@ export default function UserDashboard() {
 
   // Only the open status is fetched. The tiles above are navigation, not
   // counters, so the other three statuses have nothing to load.
+  // Which request owns the list. The tabs change the status and the pair above
+  // changes the period, and either can be clicked while the last one is still
+  // out — the same guard the officer's two screens carry.
+  const requestRef = useRef(0);
+
   const fetchCourses = useCallback(async () => {
     if (!empCode) return;
+    const request = (requestRef.current += 1);
+    const stale = () => request !== requestRef.current;
     try {
       setLoading(true);
       setError(null);
@@ -101,22 +108,27 @@ export default function UserDashboard() {
       // read behind it — the completed list shows when the course was
       // finished, which is on the learner's own row already.
       const quarterFilter = quarterFilterParams(filter.year, filter.quarter);
-      setData(
+      const rows =
         active.status === COURSE_STATUS.COMPLETED
           ? await getUserCourses(empCode, active.status, quarterFilter)
-          : await getUserCoursesWithStamps(empCode, active.status, quarterFilter)
-      );
+          : await getUserCoursesWithStamps(empCode, active.status, quarterFilter);
+      if (stale()) return;
+      setData(rows);
     } catch (err) {
+      if (stale()) return;
       setData([]);
       setError(apiErrorMessage(err, "Failed to fetch your courses"));
     } finally {
-      setLoading(false);
+      if (!stale()) setLoading(false);
     }
   }, [empCode, active.status, filter.year, filter.quarter]);
 
   useEffect(() => {
+    // The learner's dashboard opens on the current period too, so it waits for
+    // it in the same way rather than fetching every year first.
+    if (!filter.ready) return;
     fetchCourses();
-  }, [fetchCourses]);
+  }, [filter.ready, fetchCourses]);
 
   return (
     <div className="p-4 bg-[#f5f8fa] overflow-x-hidden">

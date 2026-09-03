@@ -336,8 +336,14 @@ function gapNotWithin(earlier, later, limit) {
  * `onlyEdits` narrows it to what an officer changed about the course — module,
  * section and question edits — leaving out assignment and feedback traffic.
  *
+ * `aboutEmpOnly` matches `empCode` against the employee a row is ABOUT rather
+ * than also against whoever wrote it. The default is both, which is what the
+ * officer's history grid wants — but a training officer is `action_by` on every
+ * assignment they make, so anything asking "when was this given to ME" has to
+ * set it or it reads other people's rows.
+ *
  * @param {{emoduleId?: number|string, empCode?: number|string, action?: string,
- *   onlyEdits?: boolean}} [filters]
+ *   onlyEdits?: boolean, aboutEmpOnly?: boolean}} [filters]
  */
 export async function getTransactions(filters = {}) {
   const params = {};
@@ -345,6 +351,7 @@ export async function getTransactions(filters = {}) {
   if (filters.empCode) params.empCode = filters.empCode;
   if (filters.action) params.action = filters.action;
   if (filters.onlyEdits) params.onlyEdits = true;
+  if (filters.aboutEmpOnly) params.aboutEmpOnly = true;
 
   const list = unwrap(await api.get("/emodule/transaction/list", { params }), []) ?? [];
 

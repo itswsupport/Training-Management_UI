@@ -145,6 +145,54 @@ export default function CourseDetailsEditor({ course, options, ref }) {
 
   const [error, setError] = useState(null);
 
+  /**
+   * Answering one link of the audience chain empties the ones below it:
+   * PLANT -> DEPARTMENT -> GRADE -> SELECT USER.
+   *
+   * Each field narrows what the one above it produced, so once the plant
+   * changes, the departments chosen at the old site, the grades chosen for
+   * those departments and the names chosen out of those grades are all answers
+   * to a question that no longer stands. Leaving them would save an audience
+   * the officer can no longer see the basis for -- and the four filters are an
+   * AND, so a stale department can quietly narrow the course to nobody.
+   *
+   * Only the officer's own edits cascade. The fields hydrate from the course
+   * and from its real allotment through the setters directly, so opening a
+   * course never clears what it was already aimed at.
+   *
+   * `useAudienceOptions` separately prunes picks that a *narrowed* filter no
+   * longer offers; that is a different question and already has its own answer.
+   */
+  const changePlants = (next) => {
+    setPlantIds(next);
+    setDeptIds([]);
+    setGradeIds([]);
+    setEmpCodes([]);
+  };
+
+  const changeDepts = (next) => {
+    setDeptIds(next);
+    setGradeIds([]);
+    setEmpCodes([]);
+  };
+
+  const changeGrades = (next) => {
+    setGradeIds(next);
+    setEmpCodes([]);
+  };
+
+  /**
+   * A field stays shut until the one above it is answered, so the officer
+   * re-narrows in the order the filters actually narrow.
+   *
+   * DEPARTMENT is deliberately never locked on plant, unlike the Add Module
+   * form. A course raised before PLANT existed has no plant recorded and its
+   * allottees may carry none either, so gating on it would leave the officer
+   * unable to touch the department of a course that already has one.
+   */
+  const gradeLocked = deptIds.length === 0;
+  const userLocked = gradeLocked || gradeIds.length === 0;
+
   // Courses saved before the dropdown carried employee codes hold a bare name,
   // which matches no option — keep it in the list so the field shows what the
   // course actually has instead of falling back to the placeholder.
@@ -308,7 +356,7 @@ export default function CourseDetailsEditor({ course, options, ref }) {
               label: plantLabel(p),
             }))}
             selected={plantIds}
-            onChange={setPlantIds}
+            onChange={changePlants}
             placeholder="All plants"
             searchPlaceholder="Search plant name or code…"
             allLabel="All plants"
@@ -324,7 +372,7 @@ export default function CourseDetailsEditor({ course, options, ref }) {
               label: d.name,
             }))}
             selected={deptIds}
-            onChange={setDeptIds}
+            onChange={changeDepts}
             placeholder={
               plantIds.length > 0
                 ? "Select department(s) at these plants"
@@ -346,8 +394,13 @@ export default function CourseDetailsEditor({ course, options, ref }) {
               label: g.label,
             }))}
             selected={gradeIds}
-            onChange={setGradeIds}
-            placeholder="Select grade(s)"
+            onChange={changeGrades}
+            disabled={gradeLocked}
+            // A greyed field has to say what would open it, or it reads as
+            // broken — the same job the empty SELECT USER does below.
+            placeholder={
+              gradeLocked ? "Select department first" : "Select grade(s)"
+            }
             searchPlaceholder="Search grade…"
             allLabel="All grades"
           />
@@ -364,18 +417,22 @@ export default function CourseDetailsEditor({ course, options, ref }) {
             wrapBadges
             selected={empCodes}
             onChange={setEmpCodes}
+            disabled={userLocked}
             // The empty field has to explain itself — it reads as broken
-            // otherwise, and the reason differs.
+            // otherwise, and the reason differs: which link of the chain is
+            // still unanswered, or that the three above it reach nobody.
             placeholder={
               deptIds.length === 0
                 ? "Select department first"
-                : audienceLoading
-                  ? "Loading employees…"
-                  : audienceOptions.length === 0
-                    ? "No matching employees"
-                    : `All ${audienceOptions.length} employee${
-                        audienceOptions.length === 1 ? "" : "s"
-                      }`
+                : gradeIds.length === 0
+                  ? "Select grade first"
+                  : audienceLoading
+                    ? "Loading employees…"
+                    : audienceOptions.length === 0
+                      ? "No matching employees"
+                      : `All ${audienceOptions.length} employee${
+                          audienceOptions.length === 1 ? "" : "s"
+                        }`
             }
             searchPlaceholder="Search employee name or code…"
             allLabel={

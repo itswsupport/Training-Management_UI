@@ -194,6 +194,13 @@ export async function getUserCourses(empCode, status, filter = {}) {
       // a pending row: nothing writes it at assignment (see assignedStamps).
       completedOn: displayStamp(row.regDate, row.regTime),
       completedValue: stampValue(row.regDate, row.regTime),
+      // When the course was put in front of them, on the row itself — written
+      // once at allotment and never rewritten, unlike the pair above. Null on
+      // every row allotted before the column existed; getUserCoursesWithStamps
+      // falls back to the history log for those, and to a dash when even that
+      // has nothing.
+      assignedOn: displayStamp(row.assignedDate, row.assignedTime),
+      assignedValue: stampValue(row.assignedDate, row.assignedTime),
       // The course's own quarter, carried for the dashboard's year / quarter
       // filters. Read off the module rather than the learner's row — the
       // learner has no quarter, the course they were given does.
@@ -250,6 +257,10 @@ export async function getAssignedStamps(empCode) {
   const rows = await getTransactions({
     empCode,
     action: "MODULE_ASSIGNED",
+    // Rows ABOUT this employee, not rows they wrote. A training officer is the
+    // author of every assignment they make, and without this their own
+    // dashboard reads the stamps off other people's allotments.
+    aboutEmpOnly: true,
   });
 
   for (const row of rows) {
@@ -283,6 +294,13 @@ export async function getUserCoursesWithStamps(empCode, status, filter = {}) {
   ]);
 
   return courses.map((course) => {
+    // The allotment row's own stamp is the answer wherever it has one: it is
+    // written at assignment and never rewritten, it needs no second request,
+    // and it cannot be pushed out by the log's 500-row cap. The log is the
+    // fallback, and covers the rows allotted between it being added on
+    // 28-Jul-2026 and the column existing.
+    if (course.assignedOn?.date) return course;
+
     const stamp = assigned.get(String(course.id));
     return {
       ...course,

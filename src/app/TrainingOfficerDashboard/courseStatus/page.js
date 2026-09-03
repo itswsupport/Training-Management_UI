@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 
@@ -93,27 +93,39 @@ export default function CourseStatus() {
   // dashboards use — so all four grids label a site identically.
   const { companyNames, plantNames } = useMasterNames();
 
+  // Which request owns the grid — see the officer dashboard, which carries the
+  // same guard for the same reason: a wider report takes longer to answer than
+  // a narrower one, so responses do not come back in the order they were asked
+  // for.
+  const requestRef = useRef(0);
+
   const fetchCourseStatus = useCallback(async (force = false) => {
+    const request = (requestRef.current += 1);
+    const stale = () => request !== requestRef.current;
     try {
       setLoading(true);
       setError(null);
-      setData(
-        await getCourseStatusRows({
-          force,
-          ...quarterFilterParams(filter.year, filter.quarter),
-        })
-      );
+      const rows = await getCourseStatusRows({
+        force,
+        ...quarterFilterParams(filter.year, filter.quarter),
+      });
+      if (stale()) return;
+      setData(rows);
     } catch (err) {
+      if (stale()) return;
       setData([]);
       setError(apiErrorMessage(err, "Failed to fetch course status"));
     } finally {
-      setLoading(false);
+      if (!stale()) setLoading(false);
     }
   }, [filter.year, filter.quarter]);
 
   useEffect(() => {
+    // Not before the period is known — the first render still reads "all
+    // years", and fetching on it costs an unfiltered report nobody asked for.
+    if (!filter.ready) return;
     fetchCourseStatus();
-  }, [fetchCourseStatus]);
+  }, [filter.ready, fetchCourseStatus]);
 
   return (
     <div className="p-4 bg-[#f5f8fa] overflow-x-hidden">

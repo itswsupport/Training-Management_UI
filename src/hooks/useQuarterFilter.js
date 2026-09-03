@@ -42,9 +42,18 @@ export function useQuarterFilter(storageKey = OFFICER_FILTER_KEY) {
   // Empty on the very first render and filled in on mount: today's date is not
   // available to the server's HTML, and rendering it directly would mismatch on
   // hydration.
+  //
+  // `ready` is what keeps that first render from being fetched on. Until the
+  // effect below has run, the year here is ANY_YEAR — every year — and a screen
+  // that fetches on it fires a second, unfiltered request for the whole table
+  // alongside the filtered one. The unfiltered one is the slower of the two (it
+  // is the entire module list, audience lookups and all), so it regularly
+  // landed last and left the grid showing every year while the control above it
+  // read the current one. Callers wait for this flag instead.
   const [filter, setFilter] = useState({
     year: ANY_YEAR,
     quarter: ANY_QUARTER,
+    ready: false,
   });
 
   useEffect(() => {
@@ -85,8 +94,9 @@ export function useQuarterFilter(storageKey = OFFICER_FILTER_KEY) {
             quarter: stored.quarter
               ? String(stored.quarter)
               : fallback.quarter,
+            ready: true,
           }
-        : fallback
+        : { ...fallback, ready: true }
     );
   }, [storageKey]);
 
@@ -94,7 +104,13 @@ export function useQuarterFilter(storageKey = OFFICER_FILTER_KEY) {
     setFilter((prev) => {
       const merged = { ...prev, ...next };
       try {
-        window.sessionStorage.setItem(storageKey, JSON.stringify(merged));
+        // Only the choice is stored. `ready` describes this mount, not the
+        // officer's selection, and a stored copy of it would mean nothing to
+        // the next one.
+        window.sessionStorage.setItem(
+          storageKey,
+          JSON.stringify({ year: merged.year, quarter: merged.quarter })
+        );
       } catch {
         /* a full or blocked store must not break filtering */
       }
@@ -108,6 +124,9 @@ export function useQuarterFilter(storageKey = OFFICER_FILTER_KEY) {
   return {
     year: filter.year,
     quarter: filter.quarter,
+    // False for the one render before the stored / default period is known.
+    // Fetch on the filter only once this is true.
+    ready: filter.ready,
     setYear,
     setQuarter,
   };

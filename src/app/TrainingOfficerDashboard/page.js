@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 
@@ -132,31 +132,55 @@ export default function TrainingOfficerDashboard() {
     ? `No training modules for ${narrowedBy.join(" · ")}.`
     : "No training modules found";
 
+  /**
+   * Which request the grid is currently showing, so an overtaken one cannot
+   * paint over it.
+   *
+   * Four controls narrow this list and each one starts a fresh request, but a
+   * wider request takes longer to answer than a narrow one — the whole module
+   * table, with an audience lookup over every row, against one quarter of it.
+   * So the responses do not necessarily come back in the order they were asked
+   * for, and without this the slower, wider answer lands last and the grid ends
+   * up listing years the year control says it is not showing.
+   */
+  const requestRef = useRef(0);
+
   const fetchModules = useCallback(async () => {
+    const request = (requestRef.current += 1);
+    // Superseded before it finished: another fetch is already on its way and
+    // owns the grid, so this one leaves both the rows and the spinner alone.
+    const stale = () => request !== requestRef.current;
     try {
       setLoading(true);
       setError(null);
       // The year and quarter go with the request: the officer's list is the
       // whole table, and fetching all of it to show one quarter is what the
       // filter exists to avoid.
-      setData(
-        await getModules({
-          ...quarterFilterParams(filter.year, filter.quarter),
-          companyIds: companyId ? [companyId] : [],
-          plantIds: plantId ? [plantId] : [],
-        })
-      );
+      const rows = await getModules({
+        ...quarterFilterParams(filter.year, filter.quarter),
+        companyIds: companyId ? [companyId] : [],
+        plantIds: plantId ? [plantId] : [],
+      });
+      if (stale()) return;
+      setData(rows);
     } catch (err) {
+      if (stale()) return;
       setData([]);
       setError(apiErrorMessage(err, "Failed to fetch training modules"));
     } finally {
-      setLoading(false);
+      if (!stale()) setLoading(false);
     }
   }, [filter.year, filter.quarter, companyId, plantId]);
 
   useEffect(() => {
+    // Nothing is fetched until the filter knows its period. On the first render
+    // it does not — the year is still "all years", because today's date cannot
+    // be read while the server renders the HTML — and fetching there asked for
+    // the entire table one render before asking for the current year, leaving
+    // the officer looking at every year the module list has ever held.
+    if (!filter.ready) return;
     fetchModules();
-  }, [fetchModules]);
+  }, [filter.ready, fetchModules]);
 
   // The other officer screens link here with ?tab=, as do the old /moduleForm
   // and /feedbackForm routes. Read from location rather than useSearchParams so
