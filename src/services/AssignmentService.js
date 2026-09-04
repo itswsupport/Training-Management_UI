@@ -8,7 +8,8 @@
  */
 
 import { api, sendForm, unwrap } from "@/config/api";
-import { DEFAULT_EXAM_TYPE } from "@/lib/examType";
+import { DEFAULT_EXAM_TYPE, EXAM_TYPE_LIST } from "@/lib/examType";
+import { getCourseDetail } from "./ModuleService";
 import { clean, nowStamp } from "@/utils/etmsFormat";
 
 /**
@@ -212,19 +213,25 @@ export async function submitAssignment({
     })
   );
 
-  // 1 = every paper of every section is now in, so the course feedback form is
-  // mandatory. It counts papers, not sections, so a course carrying both a pre
-  // and a post assignment only reaches 1 once the post one has been handed in
-  // too — which is what keeps the pre assignment from closing a course off.
-  const count = await getAssignmentCount(empCode, emoduleId);
+  // Whether that was the module's last paper, worked out from the papers
+  // themselves rather than from `/emodule/assignment/get_count` — see
+  // `areAllPapersSubmitted` for why that endpoint can no longer answer it.
+  const feedbackRequired = await areAllPapersSubmitted(empCode, emoduleId);
 
-  return { marks: result?.marks ?? 0, feedbackRequired: count === 1 };
+  return { marks: result?.marks ?? 0, feedbackRequired };
 }
 
 /**
  * 1 once every paper of every section — pre and post alike — has been submitted
- * for this module. Keeps returning 1 afterwards, so it cannot alone tell whether
- * the feedback form is still outstanding — see FeedbackService.isFeedbackDue.
+ * for this module.
+ *
+ * NOTHING READS THIS TODAY, and it should not be wired back in until the
+ * backend is fixed. Measured against the live service: it answers correctly for
+ * a section carrying ONE paper, and returns 0 for a section carrying two, even
+ * with every question of both papers submitted (emp 102579 / module 289 — 20 of
+ * 20 answered and stamped, count 0). `areAllPapersSubmitted` below answers the
+ * same question from the papers themselves. Kept so the endpoint and its defect
+ * stay on the record, and so this is a one-line switch back once it is right.
  */
 export async function getAssignmentCount(empCode, emoduleId) {
   return unwrap(
@@ -233,4 +240,66 @@ export async function getAssignmentCount(empCode, emoduleId) {
     }),
     0
   );
+}
+
+/**
+ * Has this employee handed in every paper of every section of this module?
+ *
+ * What `/emodule/assignment/get_count` was supposed to answer, worked out from
+ * the papers instead. That endpoint returns 0 for a section carrying both a pre
+ * and a post paper even when both are fully submitted, which left the feedback
+ * form — and with it the only transition to Completed — out of reach for every
+ * learner who finishes such a section.
+ *
+ * Read from data the module already exposes, so it needs no backend change:
+ * a paper is submitted when every one of its questions carries an answer on a
+ * handed-in attempt, which is exactly what the course content screen shows
+ * against each row. `/submit_exam/answers` is per section and carries question
+ * ids, and a question id belongs to exactly one paper, so both papers of a
+ * section are decided from a single fetch of it.
+ *
+ * A section that was never given questions is not something a learner can
+ * submit, so it cannot hold the module open. But a module with no questions
+ * anywhere returns false rather than true: there is no assignment to have
+ * finished, and reporting one as complete would offer feedback on a course
+ * nobody has been examined on.
+ *
+ * @param {string|number} empCode
+ * @param {string|number} emoduleId
+ * @returns {Promise<boolean>}
+ */
+export async function areAllPapersSubmitted(empCode, emoduleId) {
+  const course = await getCourseDetail(emoduleId);
+  const sections = course?.sections ?? [];
+  if (sections.length === 0) return false;
+
+  const results = await Promise.all(
+    sections.map(async (section) => {
+      // Both papers plus the section's answers together: the two /quiz/list
+      // calls are independent, and the answers cover both papers at once.
+      const [papers, answered] = await Promise.all([
+        Promise.all(
+          EXAM_TYPE_LIST.map((t) =>
+            getAssignmentQuestions(emoduleId, section.id, t.value)
+          )
+        ),
+        getSubmittedAnswers(emoduleId, section.id, empCode),
+      ]);
+
+      // Only the papers that were actually written. An empty one is not an
+      // outstanding paper — `isPaperSubmitted` reports no questions as not
+      // submitted, which would hold every single-paper section open for ever.
+      const written = papers.filter((questions) => questions.length > 0);
+
+      return {
+        papers: written.length,
+        done: written.every((questions) =>
+          isPaperSubmitted(questions, answered)
+        ),
+      };
+    })
+  );
+
+  // At least one paper somewhere, and every one of them in.
+  return results.some((r) => r.papers > 0) && results.every((r) => r.done);
 }

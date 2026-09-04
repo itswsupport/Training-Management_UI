@@ -9,7 +9,7 @@
 
 import { api, sendForm, unwrap } from "@/config/api";
 import { clean, displayStamp } from "@/utils/etmsFormat";
-import { getAssignmentCount } from "./AssignmentService";
+import { areAllPapersSubmitted } from "./AssignmentService";
 import { COURSE_STATUS, getUserCourses } from "./UserCourseService";
 
 /** A question with no options is an open-ended (free-text) one. */
@@ -96,18 +96,21 @@ export async function getFeedbackQuestions() {
 /**
  * True when this employee still owes the course feedback form.
  *
- * `/emodule/assignment/get_count` returns 1 once every section's assignment is
- * submitted — but it keeps returning 1 afterwards, so it alone can't say
- * whether the feedback has already been given. The course landing in the
- * employee's Completed list is what `/feedback/save` actually sets, so that is
- * what clears the prompt.
+ * Two halves, and neither answers it alone. `areAllPapersSubmitted` says the
+ * assignments are finished, but stays true for ever afterwards, so it cannot
+ * tell a course that owes feedback from one that has already given it. The
+ * course landing in the employee's Completed list is what `/feedback/save`
+ * actually sets, so that is what clears the prompt.
+ *
+ * This used to ask `/emodule/assignment/get_count` for the first half. It no
+ * longer can — see `AssignmentService.areAllPapersSubmitted`.
  */
 export async function isFeedbackDue(empCode, emoduleId) {
-  const [count, completed] = await Promise.all([
-    getAssignmentCount(empCode, emoduleId),
+  const [finished, completed] = await Promise.all([
+    areAllPapersSubmitted(empCode, emoduleId),
     getUserCourses(empCode, COURSE_STATUS.COMPLETED),
   ]);
-  if (count !== 1) return false;
+  if (!finished) return false;
   return !completed.some((course) => String(course.id) === String(emoduleId));
 }
 
