@@ -288,13 +288,13 @@ function AssignmentRow({
           {solo ? null : label}
         </span>
         <span className="min-w-0 flex-1 text-[12px] normal-case text-gray-600">
-          {count} question{count === 1 ? "" : "s"}
-          {/* Only a locked paper says anything here. The hints that used to
-              follow — "complete this before you start the lectures below", its
+          {/* Just the count. Every hint that used to follow it is gone: the
+              locked paper's reason ("open all N lectures above to unlock
+              this"), "complete this before you start the lectures below", its
               post-assignment twin, and the note that a submitted paper can no
-              longer be changed — told a learner looking at a row with a live
-              button on it what that button already says. */}
-          {locked && !submitted ? ` — ${lockedReason}` : null}
+              longer be changed — each told a learner looking at the row what
+              the button beside it already says. */}
+          {count} question{count === 1 ? "" : "s"}
         </span>
         {href ? (
           submitted ? (
