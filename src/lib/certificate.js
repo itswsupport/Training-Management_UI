@@ -41,12 +41,19 @@ export const CERT_FONT = "Arial, Helvetica, sans-serif";
  * the room between its two ends, and `size` the text's height. All four are
  * percentages of the sheet — `rule` of its height, the rest of its width.
  *
+ * `maxLines` is how many lines the blank may use before it starts shrinking.
+ * Only the course carries one: its rule is the shortest on the sheet at 21% of
+ * the width, and a real course title — "PREVENTION OF SEXUAL HARASSMENT- (POSH
+ * ACT 2013)" — had to be set at about a quarter of the name's size to fit on a
+ * single line, which is unreadable in print. There is nothing above that rule
+ * until the name's, so a second line has somewhere to go.
+ *
  * The numbers are measured off TrainingCertificate.jpg itself, so text lands on
  * the rules rather than near them; re-measure if the artwork is ever replaced.
  */
 export const CERT_FIELDS = [
   { key: "name", rule: 37.82, left: 49.71, maxWidth: 51.5, size: 2.4, weight: 700 },
-  { key: "course", rule: 45.81, left: 65.05, maxWidth: 21.0, size: 1.5, weight: 600 },
+  { key: "course", rule: 45.81, left: 65.05, maxWidth: 21.0, size: 1.5, weight: 600, maxLines: 2 },
   { key: "date", rule: 54.35, left: 47.95, maxWidth: 12.8, size: 1.5, weight: 400 },
   { key: "grade", rule: 62.18, left: 52.85, maxWidth: 12.8, size: 1.8, weight: 700 },
 ];
@@ -77,6 +84,65 @@ const CENTRE_ABOVE_BASELINE = 0.3465;
  */
 export const certFitSize = (field, width) =>
   width > field.maxWidth ? (field.size * field.maxWidth) / width : field.size;
+
+/** How far below a line the next one sits, in ems of their shared size. */
+const LINE_SPACING = 1.15;
+
+/**
+ * A blank's text, broken into the lines it will actually be set on.
+ *
+ * One line wherever it fits — breaking a title that never needed breaking would
+ * only make the sheet look ragged. Past that, the split chosen is the one whose
+ * WIDEST line is narrowest, because that widest line is what {@link certFitSize}
+ * measures against: balancing the two halves is what buys the size back.
+ *
+ * Words are never broken, so a single word longer than the rule still falls
+ * through to shrinking — which is the right answer for one, and the wrong one
+ * for the four-word titles this exists for.
+ *
+ * @param {string} text
+ * @param {(typeof CERT_FIELDS)[number]} field
+ * @returns {string[]} one entry per line, in order
+ */
+export function certLines(text, field) {
+  const value = String(text ?? "");
+  const words = value.trim().split(/\s+/).filter(Boolean);
+
+  // Server-side `certTextWidth` returns 0, so this also covers the render that
+  // has no document to measure in: one line, unshrunk, same as before.
+  if ((field.maxLines ?? 1) < 2 || words.length < 2) return [value];
+  if (certTextWidth(value, field) <= field.maxWidth) return [value];
+
+  let best = null;
+  for (let i = 1; i < words.length; i += 1) {
+    const head = words.slice(0, i).join(" ");
+    const tail = words.slice(i).join(" ");
+    const widest = Math.max(
+      certTextWidth(head, field),
+      certTextWidth(tail, field)
+    );
+    if (!best || widest < best.widest) best = { widest, lines: [head, tail] };
+  }
+  return best ? best.lines : [value];
+}
+
+/** The size that fits every one of a blank's lines between its rule's ends. */
+export const certFitSizeLines = (field, lines) =>
+  certFitSize(
+    field,
+    lines.reduce((widest, line) => Math.max(widest, certTextWidth(line, field)), 0)
+  );
+
+/**
+ * How far line `index` of `count` sits above the blank's rule, in percent of
+ * the sheet's height.
+ *
+ * The LAST line is the one written on the rule and any earlier line stacks
+ * above it, so a title that grew to two lines still reads as written on the
+ * line rather than floating over it.
+ */
+export const certLineLift = (index, count, size) =>
+  (count - 1 - index) * size * LINE_SPACING * WIDTH_PCT_IN_HEIGHT;
 
 /** Where the HTML centres a blank set at `size`: a percentage of the height. */
 export const certCentreTop = (field, size) =>
@@ -178,20 +244,31 @@ export async function downloadCertificate(values) {
     const text = String(values[field.key] ?? "");
     doc.setFont("helvetica", field.weight >= 700 ? "bold" : "normal");
 
-    // Measured at the field's own size, then set again at whatever size that
-    // measurement allows — the same fit the sheet makes on screen.
+    // Broken and measured exactly as the sheet on screen does it, so the two
+    // renderings put the same words on the same lines at the same size.
     doc.setFontSize(pt(field.size));
-    const size = certFitSize(field, (doc.getTextWidth(text) / width) * 100);
+    const lines = certLines(text, field);
+    const size = certFitSize(
+      field,
+      lines.reduce(
+        (widest, line) => Math.max(widest, (doc.getTextWidth(line) / width) * 100),
+        0
+      )
+    );
     if (size !== field.size) doc.setFontSize(pt(size));
 
-    doc.text(
-      text,
-      (field.left / 100) * width,
-      (certBaselineTop(field, size) / 100) * height,
-      // jsPDF sets text on its baseline, which is what certBaselineTop gives;
-      // the centring is the -50% the sheet's own transform makes.
-      { align: "center" }
-    );
+    lines.forEach((line, index) => {
+      const top =
+        certBaselineTop(field, size) - certLineLift(index, lines.length, size);
+      doc.text(
+        line,
+        (field.left / 100) * width,
+        (top / 100) * height,
+        // jsPDF sets text on its baseline, which is what certBaselineTop gives;
+        // the centring is the -50% the sheet's own transform makes.
+        { align: "center" }
+      );
+    });
   }
 
   doc.save(`${safeName(`Certificate - ${values.course}`)}.pdf`);

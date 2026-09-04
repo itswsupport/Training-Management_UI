@@ -9,8 +9,9 @@ import {
   CERT_FONT,
   CERT_INK,
   certCentreTop,
-  certFitSize,
-  certTextWidth,
+  certFitSizeLines,
+  certLineLift,
+  certLines,
 } from "@/lib/certificate";
 
 /**
@@ -29,14 +30,26 @@ import {
  */
 export default function CertificateSheet({ values, className = "" }) {
   // Each blank is written on a printed rule of fixed length, so its text is
-  // measured before it is placed: a long name or course title is set smaller
-  // rather than run past the ends of its rule and into the artwork's own words.
+  // measured before it is placed: it is never allowed to run past the ends of
+  // its rule and into the artwork's own words. A blank that may use two lines
+  // takes the second before it gives up any size — the course rule is the
+  // shortest on the sheet, and shrinking a real course title to fit it on one
+  // line left it a quarter the height of the name above it.
   const blanks = useMemo(
     () =>
       CERT_FIELDS.map((field) => {
-        const text = String(values?.[field.key] ?? "");
-        const size = certFitSize(field, certTextWidth(text, field));
-        return { field, text, size, top: certCentreTop(field, size) };
+        const lines = certLines(String(values?.[field.key] ?? ""), field);
+        const size = certFitSizeLines(field, lines);
+        const centre = certCentreTop(field, size);
+        return {
+          field,
+          size,
+          // Last line on the rule, earlier ones stacked above it.
+          rows: lines.map((text, index) => ({
+            text,
+            top: centre - certLineLift(index, lines.length, size),
+          })),
+        };
       }),
     [values]
   );
@@ -54,9 +67,10 @@ export default function CertificateSheet({ values, className = "" }) {
         alt="Certificate of Training"
         className="absolute inset-0 h-full w-full"
       />
-      {blanks.map(({ field, text, size, top }) => (
+      {blanks.flatMap(({ field, size, rows }) =>
+        rows.map(({ text, top }, index) => (
         <span
-          key={field.key}
+          key={`${field.key}-${index}`}
           className="absolute whitespace-nowrap"
           style={{
             left: `${field.left}%`,
@@ -73,7 +87,8 @@ export default function CertificateSheet({ values, className = "" }) {
         >
           {text}
         </span>
-      ))}
+        ))
+      )}
     </div>
   );
 }
