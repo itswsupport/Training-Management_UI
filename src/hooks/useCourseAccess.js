@@ -230,6 +230,15 @@ export function useCourseAccess(emoduleId) {
     !preview && answered && lookup.status === COURSE_STATUS.OVERDUE;
 
   /**
+   * The learner has finished this course for good. A grade C with sittings
+   * left never gets here — the backend hands it straight back to PENDING and
+   * deletes the attempt — so a course in COMPLETED will not be sat again, and
+   * its answer key can be shown without giving away a retake.
+   */
+  const completed =
+    !preview && answered && lookup.status === COURSE_STATUS.COMPLETED;
+
+  /**
    * The course is raised for a quarter that has not started yet.
    *
    * It is assigned, and it sits in PENDING from the day it is created, so the
@@ -287,6 +296,7 @@ export function useCourseAccess(emoduleId) {
      */
     canManage,
     overdue,
+    completed,
     locked,
     // "01-04-2026" — the day it opens, for the notice that says so.
     unlocksOn: locked ? quarterStartLabel(lookup.kraQuarter) : "",

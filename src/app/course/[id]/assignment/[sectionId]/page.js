@@ -71,6 +71,8 @@ export default function AssignmentPage({ params }) {
   // gets the questions with no way to answer or submit — but the same officer
   // sitting a course allotted to them answers and submits it like anybody else.
   const readOnly = access.preview;
+  // The course is finished for good, so its papers may be shown marked.
+  const completed = access.completed;
 
   const [state, setState] = useState({ status: "loading" });
 
@@ -100,10 +102,10 @@ export default function AssignmentPage({ params }) {
    * learner to tell them what they were looking at — and it fired on a plain
    * "view", which is not an action that warrants being stopped.
    *
-   * This also gave up the one thing the page cannot show inline: the score.
-   * Which answers were right is deliberately never sent to the browser, so the
-   * marks were all there was to report and the alert was the only place they
-   * appeared.
+   * The score it used to carry is shown inline instead once the course is
+   * completed: the paper is then marked right and wrong with the total in its
+   * header — see `marking` in AssignmentForm, and ANSWERS on the Completed
+   * list for every paper of the course on one page.
    */
 
   useEffect(() => {
@@ -159,10 +161,11 @@ export default function AssignmentPage({ params }) {
 
         const [answered, questions] = await Promise.all([
           getSubmittedAnswers(emoduleId, sectionId, reviewEmpCode || empCode),
-          // The answer key comes through for a review and for nothing else —
-          // marking somebody's finished paper is the one case that needs it.
+          // Always asked for: whether it is kept is decided below, once it is
+          // known whether this paper has been handed in. /quiz/list sends the
+          // key on every row regardless, so asking changes nothing on the wire.
           getAssignmentQuestions(emoduleId, sectionId, examType, {
-            withAnswerKey: reviewing,
+            withAnswerKey: true,
           }),
         ]);
         if (cancelled) return;
@@ -195,12 +198,14 @@ export default function AssignmentPage({ params }) {
             reviewEmpCode,
             /**
              * questionId → the correct option's ordinal, as a string, so it
-             * compares directly with what the employee picked. Null outside a
-             * review, which is what keeps the marking off a learner's own copy
-             * of the paper. Questions saved without a key are left out and are
-             * simply never marked either way.
+             * compares directly with what the employee picked. Kept for a
+             * review, and for a learner's own handed-in paper once the course
+             * is COMPLETED. Null while the course can still be sat — including
+             * a grade C handed back for a retake, where the key would be the
+             * answers to the next sitting. Questions saved without a key are
+             * left out and are simply never marked either way.
              */
-            answerKey: reviewing
+            answerKey: reviewing || (submitted && completed)
               ? Object.fromEntries(
                   questions
                     .filter((q) => q.answer)
@@ -231,7 +236,7 @@ export default function AssignmentPage({ params }) {
     return () => {
       cancelled = true;
     };
-  }, [emoduleId, sectionId, empCode, access.allowed, readOnly]);
+  }, [emoduleId, sectionId, empCode, access.allowed, readOnly, completed]);
 
   // The spinner covers the redirect too — a blank frame for the moment the
   // route takes to change reads as a page that failed to load.

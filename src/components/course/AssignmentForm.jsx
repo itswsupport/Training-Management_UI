@@ -58,7 +58,9 @@ function readAnswered(empCode, emoduleId, sectionId, examType, attempt) {
  *   attempt, reached from COURSE STATUS. Set only on a read-only preview, and
  *   what turns the paper from a blank copy into a marked script
  * @param {Object<string, string>} [answerKey] `{questionId: correct ordinal}`,
- *   sent for a review and never otherwise — see AssignmentService
+ *   sent for an officer's review and for a learner's paper on a course they
+ *   have COMPLETED — never while a course can still be sat, a grade C retake
+ *   included
  */
 export default function AssignmentForm({
   emoduleId,
@@ -86,8 +88,16 @@ export default function AssignmentForm({
    * too, but there is no attempt behind it to mark.
    */
   const review = Boolean(reviewEmpCode);
-  /** Only where the key actually came through — see the page's `answerKey`. */
-  const marking = review && Boolean(answerKey);
+  /**
+   * The script is marked: every chosen option called out right or wrong, the
+   * right one shown where it was missed, and the total in the header.
+   *
+   * For an officer's review, and for a learner reading back a paper on a
+   * course they have completed. The key only arrives in those two cases — see
+   * the callers' `answerKey` — so a course that can still be sat, a grade C
+   * retake included, never has its answers shown.
+   */
+  const marking = Boolean(answerKey) && (review || submitted);
 
   // Falls back to the shown questions when the page did not narrow to a lecture.
   const sectionQuestions = allQuestions ?? questions;
@@ -373,9 +383,11 @@ export default function AssignmentForm({
                  * officer reading a wrong answer needs to see what the right
                  * one was, which is the whole reason the key is fetched.
                  */
-                const isKey =
-                  marking && String(answerKey[question.id] ?? "") === option.value;
-                const isWrong = marking && chosen && !isKey;
+                const keyHere = String(answerKey?.[question.id] ?? "");
+                const isKey = marking && keyHere === option.value;
+                // Only where the question has a key at all — one saved without
+                // a key can be called neither right nor wrong.
+                const isWrong = marking && chosen && keyHere !== "" && !isKey;
                 // On a paper already handed in, the answer given is called out
                 // rather than left to a greyed-out radio. A disabled radio is
                 // the one control a browser draws faintest, which is exactly
@@ -383,7 +395,7 @@ export default function AssignmentForm({
                 // reason the paper is on screen. Stands down where the script
                 // is being marked — right and wrong say more than "yours", and
                 // three highlights on one row would say nothing at all.
-                const marked = !marking && submitted && chosen;
+                const marked = !isKey && !isWrong && submitted && chosen;
 
                 // Every highlighted row is boxed the same way, so right, wrong
                 // and "your answer" differ only in colour. w-fit so the box
