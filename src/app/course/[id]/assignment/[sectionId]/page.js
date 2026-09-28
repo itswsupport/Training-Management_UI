@@ -104,8 +104,7 @@ export default function AssignmentPage({ params }) {
    *
    * The score it used to carry is shown inline instead once the course is
    * completed: the paper is then marked right and wrong with the total in its
-   * header — see `marking` in AssignmentForm, and ANSWERS on the Completed
-   * list for every paper of the course on one page.
+   * header — see `marking` in AssignmentForm.
    */
 
   useEffect(() => {

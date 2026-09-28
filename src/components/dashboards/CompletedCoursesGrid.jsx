@@ -5,7 +5,7 @@ import Link from "next/link";
 import * as XLSX from "xlsx";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
-import { Download, Eye, ListChecks } from "lucide-react";
+import { Download, Eye } from "lucide-react";
 
 import ExoMaterialTable from "@/components/ui/common/ExoMaterialTable";
 import ExportActions from "@/components/ui/common/ExportActions";
@@ -80,25 +80,6 @@ export default function CompletedCoursesGrid({
         Cell: ({ row }) => quarterLabel(row.original.quarter) || "—",
       },
       { accessorKey: "grade", header: "GRADE" },
-      {
-        // Every pre and post paper of the course, marked right and wrong. Only
-        // on this list: a course here is finished for good — a grade C with
-        // sittings left is handed back to PENDING instead — so showing the key
-        // cannot give away a retake.
-        id: "answers",
-        header: "ANSWERS",
-        enableColumnFilter: false,
-        enableSorting: false,
-        Cell: ({ row }) => (
-          <Link
-            href={`/course/${encodeId(row.original.id)}/answers`}
-            title="View your answers"
-            className="inline-flex items-center gap-1 rounded bg-[#3482AE] px-2 py-1 text-xs font-semibold text-white hover:bg-[#2a6a8f]"
-          >
-            <ListChecks className="h-3.5 w-3.5" /> VIEW
-          </Link>
-        ),
-      },
       {
         id: "completedDate",
         header: "COMPLETED ON",
