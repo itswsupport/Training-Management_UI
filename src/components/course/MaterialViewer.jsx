@@ -85,6 +85,9 @@ function ReadBadge({ done, label }) {
  *   `{empCode, emoduleId, sectionId, lectureId, kind}`. Present only for a
  *   learner: it is what the time spent here is reported against, and an officer
  *   browsing the material has no progress to record.
+ * @param {string} [props.tabHref] where OPEN IN NEW TAB goes when the material
+ *   has a page of ours that keeps counting there. Without it the button hands
+ *   over the bare file, and nothing read in that tab is counted.
  * @param {() => void} props.onClose
  */
 export default function MaterialViewer({
@@ -93,33 +96,10 @@ export default function MaterialViewer({
   url,
   onRead,
   material,
+  tabHref,
   onClose,
 }) {
   const box = useContentBox();
-
-  /**
-   * How far through the material the learner is, as the body last reported it.
-   *
-   * Kept in a ref rather than state because only the heartbeat ever reads it —
-   * re-rendering the panel every time a page turns would buy nothing and cost a
-   * repaint of the document underneath.
-   */
-  const coverage = useRef({
-    requiredSecs: 0,
-    coveragePct: 0,
-    position: 0,
-    lastPosition: 0,
-  });
-  const report = useCallback((next) => {
-    coverage.current = next;
-  }, []);
-  const snapshot = useCallback(() => coverage.current, []);
-
-  useMaterialProgress({
-    active: Boolean(material?.lectureId),
-    material,
-    snapshot,
-  });
 
   useEffect(() => {
     const onKey = (event) => {
@@ -149,11 +129,16 @@ export default function MaterialViewer({
         </h2>
         {/* The one thing worth offering beside the document: for a PDF the
             browser's own toolbar covers printing and saving, and for anything
-            else this is the way to the file itself. */}
+            else this is the way to the file itself.
+
+            When the reading moves to our own page in the new tab, this panel
+            closes behind it — the two would otherwise both be open on the same
+            document, and only the one in front would be counting. */}
         <a
-          href={url}
+          href={tabHref ?? url}
           target="_blank"
           rel="noreferrer"
+          onClick={tabHref ? onClose : undefined}
           className="hidden shrink-0 items-center gap-1.5 rounded bg-white/15 px-3 py-1.5 text-[11px] font-bold tracking-wide text-white uppercase transition hover:bg-white/25 sm:inline-flex"
         >
           <ExternalLink className="h-3 w-3" />
@@ -169,15 +154,61 @@ export default function MaterialViewer({
         </button>
       </div>
 
-      {kind === "sheet" ? (
-        <SheetView url={url} onRead={onRead} onCoverage={report} />
-      ) : kind === "image" ? (
-        <ImageView url={url} name={name} onRead={onRead} onCoverage={report} />
-      ) : (
-        <PdfView url={url} onRead={onRead} onCoverage={report} />
-      )}
+      <MaterialBody
+        kind={kind}
+        name={name}
+        url={url}
+        onRead={onRead}
+        material={material}
+      />
     </div>,
     document.body
+  );
+}
+
+/**
+ * The material itself, with its read count, and the time spent on it reported
+ * as it goes.
+ *
+ * Separate from the panel so the reading page OPEN IN NEW TAB leads to can show
+ * exactly the same thing, counted exactly the same way.
+ *
+ * Renders its read badge absolutely, so the parent has to be positioned, and
+ * fills a flex column, so the parent has to be one with a height.
+ *
+ * @param {object} props see MaterialViewer
+ */
+export function MaterialBody({ kind, name, url, onRead, material }) {
+  /**
+   * How far through the material the learner is, as the body last reported it.
+   *
+   * Kept in a ref rather than state because only the heartbeat ever reads it —
+   * re-rendering the panel every time a page turns would buy nothing and cost a
+   * repaint of the document underneath.
+   */
+  const coverage = useRef({
+    requiredSecs: 0,
+    coveragePct: 0,
+    position: 0,
+    lastPosition: 0,
+  });
+  const report = useCallback((next) => {
+    coverage.current = next;
+  }, []);
+  const snapshot = useCallback(() => coverage.current, []);
+
+  useMaterialProgress({
+    active: Boolean(material?.lectureId),
+    material,
+    snapshot,
+  });
+
+  return kind === "sheet" ? (
+    <SheetView url={url} onRead={onRead} onCoverage={report} />
+  ) : kind === "image" ? (
+    <ImageView url={url} name={name} onRead={onRead} onCoverage={report} />
+  ) : (
+    <PdfView url={url} onRead={onRead} onCoverage={report} />
   );
 }
 

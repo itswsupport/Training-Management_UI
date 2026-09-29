@@ -24,9 +24,18 @@ import {
   isPaperSubmitted,
 } from "@/services/AssignmentService";
 import { isEmbeddableVideo } from "@/lib/video";
+import {
+  readWatched,
+  watchedStorageKey,
+  writeWatched,
+} from "@/lib/watchedTicks";
 import { MATERIAL_KINDS } from "@/services/ProgressService";
 import { materialUrl } from "@/services/ModuleService";
 import { fileName } from "@/utils/etmsFormat";
+
+// Written in by hand for the plain new-tab anchor, which next/link would
+// otherwise have added it to; see CoursePreviewCard.
+const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || "/etms";
 
 /**
  * Which lecture a question belongs to.
@@ -69,22 +78,10 @@ function questionsByLecture(lectures, questions) {
  * had just failed without reopening any of the material. The old attempt's
  * ticks are simply left under their own key rather than deleted — they are that
  * sitting's record, and nothing reads them again.
+ *
+ * The key and its reading and writing live in lib/watchedTicks, because the
+ * pages OPEN IN NEW TAB leads to write the same ticks from another tab.
  */
-const watchedStorageKey = (empCode, emoduleId, attempt) =>
-  `etms:watched:${empCode || "anon"}:${emoduleId}:${attempt}`;
-
-function readWatched(empCode, emoduleId, attempt) {
-  if (typeof window === "undefined") return new Set();
-  try {
-    const raw = window.localStorage.getItem(
-      watchedStorageKey(empCode, emoduleId, attempt)
-    );
-    const parsed = raw ? JSON.parse(raw) : [];
-    return new Set(Array.isArray(parsed) ? parsed : []);
-  } catch {
-    return new Set();
-  }
-}
 
 /**
  * A stable id for one lecture. Keyed on the backend's section/lecture ids (not
@@ -434,19 +431,30 @@ export default function CourseContent({
   }, [empCode, emoduleId, preview, attempt]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
     // An officer's browsing must not be written to storage either, or it would
     // be read back as progress the moment the flag was off.
     if (preview) return;
-    try {
-      window.localStorage.setItem(
-        watchedStorageKey(empCode, emoduleId, attempt),
-        JSON.stringify([...watched])
-      );
-    } catch {
-      // A full or blocked storage quota must not break the page.
-    }
+    // Merged into what is stored, so a tick another tab wrote in the meantime
+    // is not overwritten by this tab's older set.
+    writeWatched(empCode, emoduleId, attempt, watched);
   }, [watched, empCode, emoduleId, preview, attempt]);
+
+  // A lecture or a PDF opened in a new tab ticks itself off there. Picked up
+  // here as it lands, so the course is up to date when the learner comes back.
+  useEffect(() => {
+    if (preview) return undefined;
+    const key = watchedStorageKey(empCode, emoduleId, attempt);
+    const onStorage = (event) => {
+      if (event.key !== key) return;
+      const stored = readWatched(empCode, emoduleId, attempt);
+      setWatched((prev) => {
+        if ([...stored].every((tick) => prev.has(tick))) return prev;
+        return new Set([...prev, ...stored]);
+      });
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [empCode, emoduleId, preview, attempt]);
 
   // sectionId → {PRE: [...], POST: [...]}, read the first time a section with
   // an assignment is opened. Both papers, so each row can say what it holds.
@@ -1278,6 +1286,15 @@ export default function CourseContent({
         kind={viewing.kind}
         name={viewing.name}
         url={viewing.url}
+        // OPEN IN NEW TAB goes to our reading page rather than the bare file: a
+        // tab showing the file runs none of our code, so every page read there
+        // would go uncounted. Only a PDF has that page, and only a lecture the
+        // backend gave an id can be found again from its URL.
+        tabHref={
+          viewing.kind === "pdf" && viewing.lectureId
+            ? `${BASE_PATH}/course/${encodeId(emoduleId)}/read/${encodeId(viewing.lectureId)}`
+            : null
+        }
         onRead={viewing.onRead}
         // An officer is checking the material, not working through it, so
         // nothing they open is reported — the same reason they get no tick.

@@ -360,14 +360,23 @@ export default function AssignmentForm({
       </div>
 
       <ol>
-        {questions.map((question) => (
+        {questions.map((question, index) => (
           <li key={question.id} className="border-t border-gray-200 px-4 py-3.5">
             {/* No lecture name over the question. The paper is the section's,
                 and naming the lecture each question came from put a second
                 heading above the first one and read as a group label for
-                everything under it. */}
-            <p className="mb-3 text-[12px] leading-snug font-bold text-gray-800 uppercase">
-              {question.text}
+                everything under it.
+
+                Numbered by its place in the whole paper, not on this screen:
+                a page narrowed to one lecture's questions would otherwise
+                restart at 1 and give two different questions the same number. */}
+            <p className="mb-3 flex gap-1.5 text-[12px] leading-snug font-bold text-gray-800 uppercase">
+              <span className="shrink-0">
+                {sectionQuestions.findIndex((q) => q.id === question.id) + 1 ||
+                  index + 1}
+                .
+              </span>
+              <span>{question.text}</span>
             </p>
 
             {/* A / B on the first row, C / D on the second — the legacy form

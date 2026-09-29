@@ -1,8 +1,6 @@
 "use client";
 
-import Link from "next/link";
 import { use, useCallback, useEffect, useState } from "react";
-import { ChevronLeft } from "lucide-react";
 
 import CourseNotice, { CourseLoading } from "@/components/course/CourseNotice";
 import {
@@ -12,9 +10,10 @@ import {
 import { apiErrorMessage } from "@/config/api";
 import { useAuth } from "@/context/AuthContext";
 import { useCourseAccess } from "@/hooks/useCourseAccess";
-import { decodeId, encodeId } from "@/lib/courseId";
+import { decodeId } from "@/lib/courseId";
 import { getEmpCode } from "@/lib/permissions";
 import { isFileVideoUrl, youTubeId } from "@/lib/video";
+import { materialTick, writeWatched } from "@/lib/watchedTicks";
 import { materialUrl } from "@/services/ModuleService";
 import { getCourseDetail } from "@/services/ModuleService";
 import { MATERIAL_KINDS } from "@/services/ProgressService";
@@ -34,31 +33,18 @@ import { MATERIAL_KINDS } from "@/services/ProgressService";
  * the other side of them that could report back.
  */
 
-/** Where the course page keeps a learner's ticks — matched exactly. */
-const watchedStorageKey = (empCode, emoduleId) =>
-  `etms:watched:${empCode || "anon"}:${emoduleId}`;
-
 /**
  * Writes the same tick `CourseContent` writes, so finishing a lecture in this
  * tab shows as done when the learner returns to the course. Storage is shared
  * across tabs of one origin, so nothing has to be passed back.
+ *
+ * Under the attempt's key, as the course page reads it. This used to leave the
+ * attempt out, so the tick landed where the course page never looked.
  */
-function markWatched(empCode, emoduleId, sectionId, lectureId, kind) {
-  if (typeof window === "undefined") return;
-  const key = watchedStorageKey(empCode, emoduleId);
-  // `${sectionId}:${lectureId}::${materialId}` — the shape CourseContent builds
-  // whenever the backend gave both rows an id, which is every modern lecture.
-  const entry = `${sectionId}:${lectureId}::${kind}`;
-  try {
-    const raw = window.localStorage.getItem(key);
-    const parsed = raw ? JSON.parse(raw) : [];
-    const list = new Set(Array.isArray(parsed) ? parsed : []);
-    if (list.has(entry)) return;
-    list.add(entry);
-    window.localStorage.setItem(key, JSON.stringify([...list]));
-  } catch {
-    // A full or blocked storage quota must not break playback.
-  }
+function markWatched(empCode, emoduleId, attempt, sectionId, lectureId, kind) {
+  writeWatched(empCode, emoduleId, attempt, [
+    materialTick(sectionId, lectureId, kind),
+  ]);
 }
 
 export default function WatchLecturePage({ params }) {
@@ -179,8 +165,8 @@ export default function WatchLecturePage({ params }) {
   // cannot rebuild the player and drop the seconds already watched.
   const onWatched = useCallback(() => {
     if (untracked || !ready) return;
-    markWatched(empCode, emoduleId, state.sectionId, lectureId, kind);
-  }, [untracked, ready, empCode, emoduleId, state.sectionId, lectureId, kind]);
+    markWatched(empCode, emoduleId, access.retakes, state.sectionId, lectureId, kind);
+  }, [untracked, ready, empCode, emoduleId, access.retakes, state.sectionId, lectureId, kind]);
 
   // What the heartbeats are reported against. Null for an officer, who records
   // nothing, and until the lecture is known.
@@ -218,16 +204,12 @@ export default function WatchLecturePage({ params }) {
 
   return (
     <div className="bg-white rounded shadow border border-gray-200 overflow-hidden text-[12px]">
-      <div className="flex items-center justify-between bg-[#3482AE] px-4 py-2">
+      {/* No link back to the course here: the layout's BACK takes a fresh tab
+          there already, and two buttons for one way out was one too many. */}
+      <div className="bg-[#3482AE] px-4 py-2">
         <h2 className="min-w-0 truncate font-bold tracking-wide text-white uppercase">
           {state.lectureName || "Lecture"}
         </h2>
-        <Link
-          href={`/course/${encodeId(emoduleId)}`}
-          className="flex shrink-0 items-center gap-1 rounded bg-white/15 px-2.5 py-1 text-[11px] font-bold tracking-wide text-white uppercase transition hover:bg-white/25"
-        >
-          <ChevronLeft className="h-3 w-3" /> Course
-        </Link>
       </div>
 
       <p className="m-2 bg-[#cfe4f2] px-3 py-2 font-bold tracking-wide text-[#2f6685] uppercase">
